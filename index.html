@@ -80,7 +80,7 @@
   .col { display: flex; flex-direction: column; gap: 14px; max-width: 480px; width: 100%; margin: 0 auto; }
   .lede { font-size: 17px; max-width: 34em; }
   .choices { display: grid; grid-template-columns: 1fr; gap: 12px; }
-  @media (min-width: 560px) { .choices { grid-template-columns: 1fr 1fr; } }
+  @media (min-width: 560px) { .choices { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); } }
   .choice {
     text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
     padding: 18px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; min-height: 120px;
@@ -244,16 +244,24 @@
     return s;
   }
   // Targets to two decimals, from 0.05s up to the dial, never the same twice in one game.
+  // Mostly whole seconds (1 to the dial), a fifth under a second (0.05 to 0.99), the rest anywhere to the hundredth.
+  // Never the same target twice in one game.
   function genTargets(n, maxSec) {
-    var t = [], used = {};
+    var t = [], used = {}, whole = Math.max(1, Math.floor(maxSec));
     for (var i = 0; i < n; i++) {
       var v, tries = 0;
-      do { v = Math.round((MIN_TARGET + Math.random() * (maxSec - MIN_TARGET)) * 100) / 100; tries++; } while (used[v] && tries < 100);
+      do {
+        var r = Math.random();
+        if (r < 0.55) v = 1 + Math.floor(Math.random() * whole);
+        else if (r < 0.75) v = Math.round(5 + Math.random() * 95) / 100;
+        else v = Math.round((MIN_TARGET + Math.random() * (maxSec - MIN_TARGET)) * 100) / 100;
+        tries++;
+      } while (used[v] && tries < 100);
       used[v] = true; t.push(v);
     }
     return t;
   }
-  function fmtT(s) { return Number(s).toFixed(2); }
+  function fmtT(s) { s = Number(s); return s === Math.round(s) ? String(s) : s.toFixed(2); }
   function winners(times, targetMs) {
     var best = Infinity, w = [];
     Object.keys(times).forEach(function (id) {
@@ -290,6 +298,10 @@
     if (restored) {
       if (restored.nick) app.nick = restored.nick;
       if (restored.local) { app.local = restored.local; app.screen = 'localPlay'; }
+    }
+    if (!app.local) {
+      var savedLocal = lsGet('bb-local');
+      if (savedLocal && savedLocal.local) { app.local = savedLocal.local; if (app.local.step === 'running') app.local.step = 'ready'; app.screen = 'localPlay'; }
       if (restored.lsetup) app.lsetup = restored.lsetup;
       if (restored.create) app.create = restored.create;
     }
@@ -301,7 +313,7 @@
       if (app.user) return app.user.id().then(function (id) { app.me = id; }).catch(function () {});
     }).then(function () {
       app.dbReady = true;
-      if (restored && restored.code && app.db && app.me) { dbNet.watch(restored.code); app.stage = restored.stage || null; app.screen = 'room'; }
+      if (app.screen !== 'localPlay') resumeSession();
       render();
     });
   }
@@ -326,6 +338,27 @@
     app.nick = n;
     try { localStorage.setItem('bb-nick', n); } catch (e) { /* ignore */ }
     return n;
+  }
+  // What survives a reload: which room you were in (and, for a host, the whole room).
+  var SESSION_TTL = 6 * 3600 * 1000;
+  function lsGet(k) { try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v && (Date.now() - (v.savedAt || 0)) < SESSION_TTL ? v : null; } catch (e) { return null; } }
+  function lsSet(k, v) { try { if (v) localStorage.setItem(k, JSON.stringify(Object.assign({ savedAt: Date.now() }, v))); else localStorage.removeItem(k); } catch (e) { /* ignore */ } }
+  function saveHostState() { if (net.mode === 'peer' && peerNet.isHost && app.room) lsSet('bb-host', { room: app.room, players: app.players, results: app.results }); }
+  function resumeSession() {
+    var s = lsGet('bb-session'); if (!s || !s.code) return;
+    var mode = netMode();
+    if (s.nick) app.nick = s.nick;
+    if (s.mode === 'db') { if (mode === 'db') { dbNet.watch(s.code); app.gameSeen = -1; app.screen = 'room'; } return; }
+    if (mode !== 'peer') return;
+    if (s.mode === 'peer-host') {
+      var saved = lsGet('bb-host');
+      if (!saved || !saved.room) { lsSet('bb-session', null); return; }
+      app.screen = 'online'; app.busy = 'Reopening room ' + s.code + '…'; render();
+      peerNet.resume(s.code, saved).then(function () { app.busy = ''; enterRoom(s.code); }, function (e) { app.busy = ''; lsSet('bb-session', null); lsSet('bb-host', null); netFail(e); });
+    } else if (s.mode === 'peer-client') {
+      app.screen = 'online'; app.busy = 'Rejoining room ' + s.code + '…'; render();
+      peerNet.join(s.code, myName()).then(function () { app.busy = ''; enterRoom(s.code); }, function (e) { app.busy = ''; lsSet('bb-session', null); netFail(e); });
+    }
   }
 
   // ---------- online rooms: two transports behind one interface ----------
@@ -365,11 +398,14 @@
     render();
   }
   function enterRoom(code) {
-    app.code = code; app.stage = null; app.gameSeen = -1; app.run = { on: false, t0: 0 }; app.screen = 'room'; render();
+    app.code = code; app.stage = null; app.gameSeen = -1; app.run = { on: false, t0: 0 }; app.screen = 'room';
+    lsSet('bb-session', { mode: net.mode === 'peer' ? (peerNet.isHost ? 'peer-host' : 'peer-client') : 'db', code: code, nick: app.nick });
+    saveHostState();
+    render();
   }
   function leaveRoom(goHome) {
     if (net.mode === 'db') dbNet.leave(); else if (net.mode === 'peer') peerNet.leave();
-    net.mode = null;
+    net.mode = null; lsSet('bb-session', null); lsSet('bb-host', null);
     app.code = null; app.room = null; app.players = {}; app.results = {}; app.stage = null;
     if (goHome) { app.screen = 'home'; render(); }
   }
@@ -519,20 +555,48 @@
         });
       });
     },
+    hostSetup: function (p) {
+      peerNet.reset(); net.mode = 'peer'; peerNet.peer = p; peerNet.isHost = true; app.me = 'host';
+      p.on('connection', peerNet.onConn);
+      p.on('error', function (e) { if (e && e.type !== 'peer-unavailable') { app.err = peerNet.describe(e); render(); } });
+      p.on('disconnected', function () { try { if (!p.destroyed) p.reconnect(); } catch (e) { /* ignore */ } });
+    },
     create: function (doc, name) {
       var code = randCode();
       return peerNet.open('bb-' + code).then(function (p) {
-        peerNet.reset(); net.mode = 'peer'; peerNet.peer = p; peerNet.isHost = true;
-        app.me = 'host'; doc.code = code; doc.hostId = 'host';
+        peerNet.hostSetup(p);
+        doc.code = code; doc.hostId = 'host';
         app.room = doc; app.players = { host: { name: name, joinedAt: Date.now() } }; app.results = {};
-        p.on('connection', peerNet.onConn);
-        p.on('error', function (e) { if (e && e.type !== 'peer-unavailable') { app.err = peerNet.describe(e); render(); } });
-        p.on('disconnected', function () { try { if (!p.destroyed) p.reconnect(); } catch (e) { /* ignore */ } });
         return code;
       }, function (e) {
         if (e && e.message === 'taken') return peerNet.create(doc, name);
         throw e;
       });
+    },
+    // After the host reloads: take the same room id back and restore the room from storage.
+    resume: function (code, saved, attempt) {
+      attempt = attempt || 1;
+      return peerNet.open('bb-' + code).then(function (p) {
+        peerNet.hostSetup(p);
+        app.room = saved.room; app.players = saved.players || {}; app.results = saved.results || {};
+      }, function (e) {
+        if (e && e.message === 'taken' && attempt < 10) {
+          return new Promise(function (r) { setTimeout(r, 1500); }).then(function () { return peerNet.resume(code, saved, attempt + 1); });
+        }
+        if (e && e.message === 'taken') throw { message: 'Could not reopen room ' + code + ' yet. Wait a few seconds and reload.' };
+        throw e;
+      });
+    },
+    reconnect: function (code, name, attempt) {
+      attempt = attempt || 1;
+      app.err = 'Connection lost. Reconnecting to room ' + code + '… (try ' + attempt + ' of 20)'; render();
+      setTimeout(function () {
+        if (app.screen !== 'room' || app.code !== code) return;
+        peerNet.join(code, name).then(function () { app.err = ''; render(); }, function () {
+          if (attempt < 20 && app.screen === 'room' && app.code === code) peerNet.reconnect(code, name, attempt + 1);
+          else { app.err = 'Could not reconnect to room ' + code + '. The host may have closed it. Leave and try joining again.'; render(); }
+        });
+      }, 3000);
     },
     onConn: function (c) {
       c.on('open', function () { peerNet.conns[c.peer] = c; try { c.send(peerNet.snapshot()); } catch (e) { /* ignore */ } });
@@ -584,6 +648,7 @@
     broadcast: function () {
       var s = peerNet.snapshot();
       Object.keys(peerNet.conns).forEach(function (id) { try { peerNet.conns[id].send(s); } catch (e) { /* ignore */ } });
+      saveHostState();
       render();
     },
     join: function (code, name) {
@@ -614,7 +679,7 @@
           });
           c.on('close', function () {
             if (!done) finish({ message: 'The host closed the connection.' });
-            else if (app.screen === 'room' && net.mode === 'peer') { app.err = 'Connection to the host closed. If the host still has the page open, leave and join again with the same code to pick up where you were.'; render(); }
+            else if (app.screen === 'room' && net.mode === 'peer' && !peerNet.isHost) peerNet.reconnect(code, name);
           });
         });
       });
@@ -666,6 +731,7 @@
 
   // ---------- rendering ----------
   function render() {
+    if (app.screen === 'localPlay' && app.local) lsSet('bb-local', { local: app.local }); else if (!app.local) lsSet('bb-local', null);
     renderConn();
     var focusedId = document.activeElement && document.activeElement.id;
     var view = screens[app.screen] ? screens[app.screen]() : screens.home();
@@ -723,9 +789,12 @@
         h('button', { class: 'choice', id: 'c-online', disabled: !onlineOk, onclick: function () { app.err = ''; app.screen = 'online'; render(); } },
           h('span', { class: 'choice-t' }, 'Online room'),
           h('span', { class: 'choice-d' }, onlineNote)),
-        h('button', { class: 'choice', id: 'c-local', onclick: function () { app.err = ''; app.screen = 'localSetup'; render(); } },
+        h('button', { class: 'choice', id: 'c-local', onclick: function () { app.err = ''; app.lsetup.solo = false; app.screen = 'localSetup'; render(); } },
           h('span', { class: 'choice-t' }, 'One device'),
-          h('span', { class: 'choice-d' }, 'Pass one phone around. Players take turns, times stay sealed until the round ends.'))
+          h('span', { class: 'choice-d' }, 'Pass one phone around. Players take turns, times stay sealed until the round ends.')),
+        h('button', { class: 'choice', id: 'c-solo', onclick: function () { app.err = ''; app.lsetup.solo = true; app.screen = 'localSetup'; render(); } },
+          h('span', { class: 'choice-t' }, 'Solo'),
+          h('span', { class: 'choice-d' }, 'Train your inner clock. Every round scores at once, and your best average is kept.'))
       ),
       h('p', { class: 'hint' }, 'No numbers are shown while the clock runs. Count in your head, sing a song, whatever works.')
     );
@@ -762,7 +831,7 @@
         stepper('Players', function () { return c.size; }, function (v) { c.size = v; }, 2, 8),
         stepper('Rounds', function () { return c.rounds; }, function (v) { c.rounds = v; }, 1, 20),
         dial(function () { return c.maxSec; }, function (v) { c.maxSec = v; }),
-        h('p', { class: 'hint' }, 'Targets run from ' + fmtT(MIN_TARGET) + 's to ' + c.maxSec + 's, to the hundredth, never the same twice in a game. The game starts the moment ' + c.size + ' players are in.'),
+        h('p', { class: 'hint' }, 'Mostly whole seconds up to ' + c.maxSec + ', with some surprises like 0.57. Never the same target twice in a game. The game starts the moment ' + c.size + ' players are in.'),
         h('button', { class: 'btn primary big', id: 'create', onclick: createRoom }, 'Create room')),
       h('details', {}, h('summary', {}, 'Inviting friends'),
         h('p', {}, mode === 'peer'
@@ -901,18 +970,22 @@
           oninput: function (e) { s.names[i] = e.target.value; } }));
       })(i);
     }
+    var solo = !!s.solo, best = lsGet('bb-best');
     return h('section', { class: 'col' },
-      h('h2', {}, 'One device'),
+      h('h2', {}, solo ? 'Solo' : 'One device'),
       h('div', { class: 'panel' },
-        stepper('Players', function () { return s.n; }, function (v) { s.n = v; }, 2, 8),
-        h('div', { class: 'names' }, inputs),
+        solo ? null : stepper('Players', function () { return s.n; }, function (v) { s.n = v; }, 2, 8),
+        solo ? null : h('div', { class: 'names' }, inputs),
         stepper('Rounds', function () { return s.rounds; }, function (v) { s.rounds = v; }, 1, 20),
         dial(function () { return s.maxSec; }, function (v) { s.maxSec = v; })),
-      h('p', { class: 'hint' }, 'Players take turns on the same target. Each time stays sealed until everyone in the round has gone.'),
+      h('p', { class: 'hint' }, solo
+        ? (best && best.avg !== undefined ? 'Your best so far: off by ' + fmt(best.avg) + ' per round on average, over ' + best.rounds + (best.rounds === 1 ? ' round.' : ' rounds.') : 'Each round shows how close you were. Finish a game to set your personal best.')
+        : 'Players take turns on the same target. Each time stays sealed until everyone in the round has gone.'),
       h('button', { class: 'btn primary big', id: 'start', onclick: function () {
         sfx.unlock();
         var names = []; for (var i = 0; i < s.n; i++) names.push((s.names[i] || '').trim().slice(0, 14) || 'Player ' + (i + 1));
-        app.local = { names: names, rounds: s.rounds, maxSec: s.maxSec, targets: genTargets(s.rounds, s.maxSec), round: 1, turn: 0, step: 'pass', times: [] };
+        if (solo) names = ['You'];
+        app.local = { names: names, rounds: s.rounds, maxSec: s.maxSec, targets: genTargets(s.rounds, s.maxSec), round: 1, turn: 0, step: solo ? 'ready' : 'pass', times: [], solo: solo };
         app.run = { on: false, t0: 0 };
         app.screen = 'localPlay'; render();
       } }, 'Start'),
@@ -932,6 +1005,7 @@
     var L = app.local;
     if (!L) { app.screen = 'localSetup'; return screens.localSetup(); }
     var k = L.round, target = L.targets[k - 1], who = L.names[L.turn], body;
+    if (L.solo && L.step === 'pass') L.step = 'ready';
     if (L.step === 'pass') {
       body = h('div', { class: 'stage' },
         h('p', { class: 'eyebrow' }, 'Round ' + k + ' of ' + L.rounds + ' · turn ' + (L.turn + 1) + ' of ' + L.names.length),
@@ -943,8 +1017,8 @@
           'READY', h('small', {}, 'Only ' + who + ' taps this')));
     } else if (L.step === 'ready' || L.step === 'running') {
       body = h('div', { class: 'stage' },
-        h('p', { class: 'eyebrow' }, 'Now playing'),
-        h('p', { class: 'turn-name', style: 'font-size:clamp(22px,7vw,36px)' }, who),
+        L.solo ? null : h('p', { class: 'eyebrow' }, 'Now playing'),
+        L.solo ? null : h('p', { class: 'turn-name', style: 'font-size:clamp(22px,7vw,36px)' }, who),
         clockStage(k, L.rounds, target, function () { L.step = 'running'; startClock(); }, function () {
           var ms = stopClock(); if (ms === null) return;
           if (!L.times[k - 1]) L.times[k - 1] = [];
@@ -953,6 +1027,46 @@
           else { L.step = 'results'; sfx.reveal(); }
           render();
         }, false));
+    } else if (L.step === 'results' && L.solo) {
+      var lastS = k >= L.rounds, msS = L.times[k - 1][0], dS = Math.abs(msS - target * 1000);
+      var doneRounds = L.times.filter(function (t) { return t && typeof t[0] === 'number'; });
+      var totalErr = doneRounds.reduce(function (a, t, i) { return a + Math.abs(t[0] - L.targets[i] * 1000); }, 0);
+      body = h('div', { class: 'stage' },
+        h('p', { class: 'eyebrow' }, 'Round ' + k + ' of ' + L.rounds),
+        h('p', { class: 'winner' }, dS <= 50 ? 'Dead on' : dS <= 200 ? 'So close' : dS <= 1000 ? 'Not bad' : 'Way off'),
+        h('div', { class: 'panel' },
+          h('ul', { class: 'list' },
+            h('li', {}, h('span', { class: 'name' }, 'Target'), h('span', { class: 'score num' }, fmtT(target) + 's')),
+            h('li', {}, h('span', { class: 'name' }, 'You stopped at'), h('span', { class: 'score num' }, fmt(msS))),
+            h('li', { class: 'first' }, h('span', { class: 'name' }, 'Off by'), h('span', { class: 'score num' }, fmtDiff(msS, target * 1000))),
+            h('li', {}, h('span', { class: 'name' }, 'Average so far'), h('span', { class: 'score num' }, fmt(totalErr / doneRounds.length))))),
+        h('button', { class: 'btn ' + (lastS ? 'gold' : 'primary') + ' big', style: 'width:100%', onclick: function () {
+          if (lastS) {
+            L.step = 'final';
+            var avg = totalErr / L.rounds, b = lsGet('bb-best');
+            if (!b || b.avg === undefined || avg < b.avg) { lsSet('bb-best', { avg: avg, rounds: L.rounds, maxSec: L.maxSec }); L.newBest = true; }
+          } else { L.round++; L.turn = 0; L.step = 'ready'; }
+          render();
+        } }, lastS ? 'See summary' : 'Round ' + (k + 1)));
+    } else if (L.step === 'final' && L.solo) {
+      var errs = L.times.map(function (t, i) { return Math.abs(t[0] - L.targets[i] * 1000); });
+      var totalF = errs.reduce(function (a, b) { return a + b; }, 0), bestI = errs.indexOf(Math.min.apply(null, errs));
+      body = h('div', { class: 'stage' },
+        h('p', { class: 'eyebrow' }, 'Game over · ' + L.rounds + (L.rounds === 1 ? ' round' : ' rounds')),
+        h('p', { class: 'winner' }, L.newBest ? 'New personal best' : 'Off by ' + fmt(totalF / L.rounds) + ' a round'),
+        h('div', { class: 'panel' },
+          h('ul', { class: 'list' },
+            h('li', { class: 'first' }, h('span', { class: 'name' }, 'Average error'), h('span', { class: 'score num' }, fmt(totalF / L.rounds))),
+            h('li', {}, h('span', { class: 'name' }, 'Total error'), h('span', { class: 'score num' }, fmt(totalF))),
+            h('li', {}, h('span', { class: 'name' }, 'Best round'), h('span', { class: 'diff' }, 'target ' + fmtT(L.targets[bestI]) + 's'), h('span', { class: 'score num' }, fmtDiff(L.times[bestI][0], L.targets[bestI] * 1000))))),
+        h('details', { style: 'width:100%' }, h('summary', {}, 'Every round'),
+          h('ol', { class: 'list' }, L.times.map(function (t, i) {
+            return h('li', {}, h('span', { class: 'rank' }, String(i + 1)), h('span', { class: 'name' }, 'Target ' + fmtT(L.targets[i]) + 's'), h('span', { class: 'score num' }, fmt(t[0])), h('span', { class: 'diff' }, fmtDiff(t[0], L.targets[i] * 1000)));
+          }))),
+        h('button', { class: 'btn primary big', style: 'width:100%', onclick: function () {
+          app.local = { names: ['You'], rounds: L.rounds, maxSec: L.maxSec, targets: genTargets(L.rounds, L.maxSec), round: 1, turn: 0, step: 'ready', times: [], solo: true };
+          render();
+        } }, 'Play again'));
     } else if (L.step === 'results') {
       var last = k >= L.rounds, times = localTimes(k), w = winners(times, target * 1000), S = localStandings();
       body = h('div', { class: 'stage' },
@@ -982,7 +1096,7 @@
         h('button', { class: 'btn primary big', style: 'width:100%', onclick: function () { app.local = null; app.screen = 'localSetup'; render(); } }, 'Play again'));
     }
     return h('section', { class: 'play' }, body,
-      h('button', { class: 'link', onclick: function () { app.local = null; app.run = { on: false, t0: 0 }; app.screen = 'localSetup'; render(); } }, 'Quit game'));
+      h('button', { class: 'link', onclick: function () { app.lsetup.solo = !!L.solo; app.local = null; app.run = { on: false, t0: 0 }; app.screen = 'localSetup'; render(); } }, 'Quit game'));
   };
 
   // ---------- start (survives live republishes where the viewer supports it) ----------
