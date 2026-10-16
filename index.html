@@ -107,7 +107,7 @@
   /* Stage */
   .play { display: flex; flex-direction: column; gap: 18px; flex: 1; min-height: 0; }
   .stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; }
-  .target { font-family: var(--display); font-size: clamp(44px, 16vw, 96px); line-height: 1; color: var(--gold); }
+  .target { font-family: var(--display); font-size: clamp(40px, 14vw, 88px); font-variant-numeric: tabular-nums; line-height: 1; color: var(--gold); }
   .target small { font-size: .35em; color: var(--muted); font-family: var(--body); font-weight: 500; letter-spacing: .1em; margin-left: 6px; }
   .buzzer {
     width: min(68vw, 280px); aspect-ratio: 1; max-width: 100%; border-radius: 50%; border: 0; cursor: pointer;
@@ -174,7 +174,7 @@
 (function () {
   'use strict';
 
-  var MIN_TARGET = 3;
+  var MIN_TARGET = 0.05;
   var DIAL_STOPS = [10, 20, 30, 40, 50, 60];
   function snapDial(v) { return DIAL_STOPS.indexOf(v) === -1 ? 20 : v; }
   var app = {
@@ -243,11 +243,17 @@
     for (var i = 0; i < 4; i++) s += a[Math.floor(Math.random() * a.length)];
     return s;
   }
+  // Targets to two decimals, from 0.05s up to the dial, never the same twice in one game.
   function genTargets(n, maxSec) {
-    var t = [];
-    for (var i = 0; i < n; i++) t.push(MIN_TARGET + Math.floor(Math.random() * (maxSec - MIN_TARGET + 1)));
+    var t = [], used = {};
+    for (var i = 0; i < n; i++) {
+      var v, tries = 0;
+      do { v = Math.round((MIN_TARGET + Math.random() * (maxSec - MIN_TARGET)) * 100) / 100; tries++; } while (used[v] && tries < 100);
+      used[v] = true; t.push(v);
+    }
     return t;
   }
+  function fmtT(s) { return Number(s).toFixed(2); }
   function winners(times, targetMs) {
     var best = Infinity, w = [];
     Object.keys(times).forEach(function (id) {
@@ -652,7 +658,6 @@
   function stopClock() {
     if (!app.run.on) return null;
     var ms = Math.round(performance.now() - app.run.t0);
-    if (ms < 150) return null;
     app.run = { on: false, t0: 0 };
     sfx.stop();
     try { if (navigator.vibrate) navigator.vibrate([30, 40, 30]); } catch (e) { /* ignore */ }
@@ -757,7 +762,7 @@
         stepper('Players', function () { return c.size; }, function (v) { c.size = v; }, 2, 8),
         stepper('Rounds', function () { return c.rounds; }, function (v) { c.rounds = v; }, 1, 20),
         dial(function () { return c.maxSec; }, function (v) { c.maxSec = v; }),
-        h('p', { class: 'hint' }, 'Targets are whole seconds between ' + MIN_TARGET + ' and ' + c.maxSec + '. The game starts the moment ' + c.size + ' players are in.'),
+        h('p', { class: 'hint' }, 'Targets run from ' + fmtT(MIN_TARGET) + 's to ' + c.maxSec + 's, to the hundredth, never the same twice in a game. The game starts the moment ' + c.size + ' players are in.'),
         h('button', { class: 'btn primary big', id: 'create', onclick: createRoom }, 'Create room')),
       h('details', {}, h('summary', {}, 'Inviting friends'),
         h('p', {}, mode === 'peer'
@@ -793,7 +798,7 @@
   function roundResults(k, times, target, names, meId) {
     var tMs = target * 1000, w = winners(times, tMs);
     var ids = Object.keys(times).sort(function (a, b) { return Math.abs(times[a] - tMs) - Math.abs(times[b] - tMs); });
-    return h('div', { class: 'panel' }, h('h3', {}, 'Round ' + k + ' · target ' + target + 's'),
+    return h('div', { class: 'panel' }, h('h3', {}, 'Round ' + k + ' · target ' + fmtT(target) + 's'),
       h('ol', { class: 'list' }, ids.map(function (id, i) {
         var won = w.indexOf(id) !== -1;
         return h('li', { class: (won ? 'first ' : '') + (id === meId ? 'me' : '') },
@@ -813,9 +818,9 @@
       onkeydown: function (e) { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onStart(); } } }, 'START');
     return h('div', { class: 'stage' },
       h('p', { class: 'eyebrow' }, 'Round ' + k + ' of ' + total),
-      h('div', { class: 'target num' }, String(target), h('small', {}, 'SECONDS')),
+      h('div', { class: 'target num' }, fmtT(target), h('small', {}, 'SECONDS')),
       btn,
-      h('p', { class: 'muted' }, sealed ? 'Your time is locked in.' : running ? 'Clock is running. Nothing on screen will move.' : 'Tap to start. Tap again at ' + target + ' seconds.'));
+      h('p', { class: 'muted' }, sealed ? 'Your time is locked in.' : running ? 'Clock is running. Nothing on screen will move.' : 'Tap to start. Tap again at ' + fmtT(target) + ' seconds.'));
   }
 
   screens.room = function () {
@@ -852,7 +857,7 @@
       var pending = activeIds().filter(function (id) { return t[id] === undefined && id !== app.me; }).map(pname);
       body = h('div', { class: 'stage' },
         h('p', { class: 'eyebrow' }, 'Round ' + k + ' of ' + R.rounds),
-        h('div', { class: 'target num' }, String(target), h('small', {}, 'SECONDS')),
+        h('div', { class: 'target num' }, fmtT(target), h('small', {}, 'SECONDS')),
         h('button', { class: 'buzzer sealed', disabled: true }, 'WAITING'),
         h('p', { class: 'muted' }, pending.length ? 'Waiting for ' + pending.join(', ') + '…' : 'Your time is in.'),
         playersPanel('Waiting for', function (id) {
@@ -933,7 +938,7 @@
         h('p', { class: 'eyebrow' }, 'Pass the phone to'),
         h('p', { class: 'turn-name' }, who),
         h('p', { class: 'muted' }, 'Target this round'),
-        h('div', { class: 'target num' }, String(target), h('small', {}, 'SECONDS')),
+        h('div', { class: 'target num' }, fmtT(target), h('small', {}, 'SECONDS')),
         h('button', { class: 'btn primary big ready', id: 'ready', style: 'width:100%', onclick: function () { L.step = 'ready'; render(); } },
           'READY', h('small', {}, 'Only ' + who + ' taps this')));
     } else if (L.step === 'ready' || L.step === 'running') {

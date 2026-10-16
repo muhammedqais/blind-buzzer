@@ -25,7 +25,8 @@ every time stays sealed until the last player in the round has gone.
 
 ## Rules
 
-- Targets are whole seconds between 3 and the room's longest target.
+- Targets run from 0.05s to the longest target on the dial, to the hundredth,
+  and never repeat within a game.
 - Every player in a round gets the same target.
 - Closest absolute error wins the round. Equal errors share the point.
 - Final order: round points, then lowest total error.
