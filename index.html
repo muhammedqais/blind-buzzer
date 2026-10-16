@@ -126,6 +126,21 @@
   /* Dial: six stops, 10s to 60s */
   .dial { display: flex; flex-direction: column; gap: 8px; }
   .dial-track { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
+  .dial input[type="range"] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 44px; margin: 0; background: transparent; touch-action: pan-y; cursor: pointer;
+  }
+  .dial input[type="range"]::-webkit-slider-runnable-track {
+    height: 14px; border-radius: 999px; border: 1px solid var(--line);
+    background: linear-gradient(90deg, var(--gold) 0, var(--gold) var(--p, 0%), var(--panel-2) var(--p, 0%), var(--panel-2) 100%);
+  }
+  .dial input[type="range"]::-moz-range-track { height: 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); }
+  .dial input[type="range"]::-moz-range-progress { height: 14px; border-radius: 999px; background: var(--gold); }
+  .dial input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 36px; height: 36px; margin-top: -12px; border-radius: 50%;
+    background: var(--fg); border: 4px solid var(--gold); box-shadow: 0 4px 12px rgba(0,0,0,.5);
+  }
+  .dial input[type="range"]::-moz-range-thumb { width: 36px; height: 36px; border-radius: 50%; background: var(--fg); border: 4px solid var(--gold); box-shadow: 0 4px 12px rgba(0,0,0,.5); }
+  .dial-ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
   .dial-track.n3 { grid-template-columns: repeat(3, 1fr); }
   .dial-stop { border: 0; background: transparent; border-radius: 999px; padding: 10px 2px; font-family: var(--display); font-size: 13px; line-height: 1.1; color: var(--muted); cursor: pointer; min-width: 0; }
   .dial-stop[aria-pressed="true"] { background: var(--gold); color: #2a1d00; }
@@ -176,8 +191,8 @@
   'use strict';
 
   var MIN_TARGET = 0.05;
-  var DIAL_STOPS = [10, 20, 30, 40, 50, 60];
-  function snapDial(v) { return DIAL_STOPS.indexOf(v) === -1 ? 20 : v; }
+  var DIAL_MIN = 1, DIAL_MAX = 60;
+  function snapDial(v) { v = Math.round(Number(v)); return v >= DIAL_MIN && v <= DIAL_MAX ? v : 20; }
   var app = {
     screen: 'home', db: null, user: null, me: null, dbReady: false, nick: '', err: '', busy: '',
     code: null, room: null, players: {}, results: {}, unsubs: [], stage: null, run: { on: false, t0: 0 },
@@ -794,12 +809,17 @@
       h('span', { class: 'val num' }, get() + (unit || '')),
       h('button', { class: 'btn sm', 'aria-label': 'More ' + label, onclick: function () { if (get() < max) { set(get() + 1); render(); } } }, '+'));
   }
+  // Swipe dial: drag anywhere from 1s to 60s. The readout updates live; the page re-renders once you let go.
   function dial(get, set) {
+    var readout = h('span', { class: 'val num', id: 'dial-val' }, get() + 's');
+    var slider = h('input', { id: 'dial', type: 'range', min: String(DIAL_MIN), max: String(DIAL_MAX), step: '1', value: String(get()), 'aria-label': 'Longest target in seconds',
+      oninput: function (e) { var v = snapDial(e.target.value); set(v); readout.textContent = v + 's'; e.target.style.setProperty('--p', ((v - DIAL_MIN) / (DIAL_MAX - DIAL_MIN) * 100) + '%'); },
+      onchange: function () { render(); } });
+    slider.style.setProperty('--p', ((get() - DIAL_MIN) / (DIAL_MAX - DIAL_MIN) * 100) + '%');
     return h('div', { class: 'dial', role: 'group', 'aria-label': 'Longest target' },
-      h('div', { class: 'stepper' }, h('span', { class: 'lbl' }, 'Longest target'), h('span', { class: 'val num' }, get() + 's')),
-      h('div', { class: 'dial-track' }, DIAL_STOPS.map(function (v) {
-        return h('button', { class: 'dial-stop', 'aria-pressed': get() === v ? 'true' : 'false', onclick: function () { set(v); render(); } }, String(v));
-      })));
+      h('div', { class: 'stepper' }, h('span', { class: 'lbl' }, 'Longest target'), readout),
+      slider,
+      h('div', { class: 'dial-ends' }, h('span', {}, DIAL_MIN + 's'), h('span', {}, 'swipe'), h('span', {}, DIAL_MAX + 's')));
   }
   function styleSeg(get, set) {
     return h('div', { class: 'dial', role: 'group', 'aria-label': 'Target style' },

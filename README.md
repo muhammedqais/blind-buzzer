@@ -11,7 +11,7 @@ Open `index.html` from any web host (GitHub Pages works as is). No build
 step, no server, no accounts.
 
 **Online room.** One person taps *Online room*, picks the number of players,
-rounds and the longest target (a dial from 10s to 60s), and gets a 4-letter
+rounds and the longest target (swipe the dial, 1s to 60s), and gets a 4-letter
 code. Friends open the same link, type a name and the code, and the game
 starts the moment the room is full. Everyone plays each round on their own
 phone; a round is revealed once every time is in. Rooms are peer to peer over
