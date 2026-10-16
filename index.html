@@ -260,20 +260,27 @@
     return s;
   }
   // Targets to two decimals, from 0.05s up to the dial, never the same twice in one game.
-  // Target styles: 'whole' = whole seconds from 1 to the dial; 'fraction' = under a second, 0.05 to 0.99;
-  // 'mixed' = two thirds whole, one third fractions. Never the same target twice in one game.
-  var STYLES = [['whole', 'Whole seconds'], ['fraction', 'Fractions'], ['mixed', 'Mixed']];
+  // Target styles, all from 0.05s up to the dial:
+  //   'whole'    = whole seconds only (2, 7, 15)
+  //   'fraction' = decimals only, never .00 (0.83, 2.69, 18.36); half of them under a second
+  //   'mixed'    = half whole seconds, half decimals
+  // Never the same target twice in one game.
+  var STYLES = [['whole', 'Whole seconds'], ['fraction', 'Decimals'], ['mixed', 'Mixed']];
   function snapStyle(v) { return v === 'whole' || v === 'fraction' ? v : 'mixed'; }
-  function styleName(v) { v = snapStyle(v); return v === 'whole' ? 'whole seconds' : v === 'fraction' ? 'fractions of a second' : 'mixed targets'; }
+  function styleName(v) { v = snapStyle(v); return v === 'whole' ? 'whole seconds' : v === 'fraction' ? 'decimals' : 'mixed targets'; }
+  function randDecimal(maxSec) {
+    var whole = Math.floor(maxSec);
+    if (whole < 2 || Math.random() < 0.5) return Math.round(5 + Math.random() * 94) / 100;           // 0.05 .. 0.99
+    return 1 + Math.floor(Math.random() * (whole - 1)) + Math.round(1 + Math.random() * 98) / 100;    // 1.01 .. (dial-1).99
+  }
   function genTargets(n, maxSec, style) {
     style = snapStyle(style);
     var t = [], used = {}, whole = Math.max(1, Math.floor(maxSec));
     for (var i = 0; i < n; i++) {
       var v, tries = 0;
       do {
-        var frac = style === 'fraction' || (style === 'mixed' && Math.random() < 1 / 3);
-        if (frac) v = Math.round(5 + Math.random() * 95) / 100;
-        else v = 1 + Math.floor(Math.random() * whole);
+        var dec = style === 'fraction' || (style === 'mixed' && Math.random() < 0.5);
+        v = dec ? randDecimal(maxSec) : 1 + Math.floor(Math.random() * whole);
         tries++;
       } while (used[v] && tries < 100);
       used[v] = true; t.push(v);
@@ -827,7 +834,7 @@
       h('div', { class: 'dial-track n3' }, STYLES.map(function (o) {
         return h('button', { class: 'dial-stop', 'aria-pressed': get() === o[0] ? 'true' : 'false', onclick: function () { set(o[0]); render(); } }, o[1]);
       })),
-      h('p', { class: 'hint' }, get() === 'whole' ? 'Whole seconds only, 1 up to the dial.' : get() === 'fraction' ? 'Under a second only, 0.05 to 0.99.' : 'Two in three whole seconds, one in three under a second.'));
+      h('p', { class: 'hint' }, get() === 'whole' ? 'Whole seconds only, 1 up to the dial.' : get() === 'fraction' ? 'Decimals only, like 0.83 or 18.36, never a round number. Half of them under a second.' : 'Half whole seconds like 2, half decimals like 3.79.'));
   }
   function nameField() {
     return h('div', { class: 'field' },
@@ -893,7 +900,7 @@
         stepper('Players', function () { return c.size; }, function (v) { c.size = v; }, 2, 8),
         stepper('Rounds', function () { return c.rounds; }, function (v) { c.rounds = v; }, 1, 20),
         styleSeg(function () { return c.style; }, function (v) { c.style = v; }),
-        c.style === 'fraction' ? null : dial(function () { return c.maxSec; }, function (v) { c.maxSec = v; }),
+        dial(function () { return c.maxSec; }, function (v) { c.maxSec = v; }),
         h('p', { class: 'hint' }, 'Never the same target twice in a game. The game starts the moment ' + c.size + ' players are in.'),
         h('button', { class: 'btn primary big', id: 'create', onclick: createRoom }, 'Create room')),
       h('details', {}, h('summary', {}, 'Inviting friends'),
@@ -964,7 +971,7 @@
       return h('section', { class: 'col', style: 'text-align:center' },
         h('p', { class: 'eyebrow' }, 'Room code'),
         h('div', { class: 'codebig' }, R.code),
-        h('p', { class: 'muted' }, ids.length + ' of ' + R.size + ' in · ' + R.rounds + (R.rounds === 1 ? ' round' : ' rounds') + ' · ' + (R.style === 'fraction' ? 'fractions of a second' : styleName(R.style) + ' up to ' + R.maxSec + 's')),
+        h('p', { class: 'muted' }, ids.length + ' of ' + R.size + ' in · ' + R.rounds + (R.rounds === 1 ? ' round' : ' rounds') + ' · ' + styleName(R.style) + ' up to ' + R.maxSec + 's'),
         h('p', {}, 'Starts on its own when ' + (R.size - ids.length) + ' more ' + (R.size - ids.length === 1 ? 'joins.' : 'join.')),
         net.mode === 'peer' && peerNet.isHost ? h('p', { class: 'hint' }, 'Your device runs this room. Keep the page open until the game ends.') : null,
         playersPanel('In the room'),
@@ -1048,7 +1055,7 @@
         solo ? null : h('div', { class: 'names' }, inputs),
         stepper('Rounds', function () { return s.rounds; }, function (v) { s.rounds = v; }, 1, 20),
         styleSeg(function () { return s.style; }, function (v) { s.style = v; }),
-        s.style === 'fraction' ? null : dial(function () { return s.maxSec; }, function (v) { s.maxSec = v; })),
+        dial(function () { return s.maxSec; }, function (v) { s.maxSec = v; })),
       h('p', { class: 'hint' }, solo
         ? (best && best.avg !== undefined ? 'Your best so far: off by ' + fmt(best.avg) + ' per round on average, over ' + best.rounds + (best.rounds === 1 ? ' round.' : ' rounds.') : 'Each round shows how close you were. Finish a game to set your personal best.')
         : 'Players take turns on the same target. Each time stays sealed until everyone in the round has gone.'),

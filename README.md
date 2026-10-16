@@ -31,9 +31,10 @@ one-device and solo games pick up where they were.
 
 ## Rules
 
-- Target style is chosen per game: **Whole seconds** (1 up to the dial),
-  **Fractions** (under a second, 0.05 to 0.99) or **Mixed** (two in three whole,
-  one in three fractions). None repeats in a game.
+- Target style is chosen per game, all from 0.05s up to the dial: **Whole
+  seconds** (2, 7, 15), **Decimals** (never a round number: 0.83, 2.69, 18.36,
+  half of them under a second) or **Mixed** (half whole, half decimals). None
+  repeats in a game.
 - Every player in a round gets the same target.
 - Closest absolute error wins the round. Equal errors share the point.
 - Final order: round points, then lowest total error.
