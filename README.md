@@ -10,15 +10,16 @@ takes the round; most rounds won takes the game (ties broken by total error).
 Open `index.html` from any web host (GitHub Pages works as is). No build
 step, no server, no accounts.
 
-**Online room.** One person taps *Online room*, picks the number of players,
-rounds and the longest target (swipe the dial, 1s to 60s), and gets a 4-letter
-code. Friends open the same link, type a name and the code, and the game
-starts the moment the room is full. Everyone plays each round on their own
-phone; a round is revealed once every time is in. Rooms are peer to peer over
-WebRTC (PeerJS): the creator's browser runs the room, so the host keeps the
-page open until the game ends. If a player drops, anyone can tap *Skip* next
-to their name, and a player who rejoins with the same code picks up where
-they were.
+**Online room.** One person taps *Online room*, picks rounds, target style
+and the longest target (swipe the dial, 1s to 60s), and gets a 4-letter code.
+Friends open the same link, type a name and the code, and tap *Ready*. The
+host taps *Start* once everyone is ready (the button says who is not). Everyone
+plays each round on their own phone; a round is revealed once every time is
+in. *Play again* returns the room to the lobby, where the host can change the
+settings before the next game. Rooms are peer to peer over WebRTC (PeerJS):
+the host's browser runs the room, and if the host leaves or drops, the room
+passes to the next player automatically. If a player stalls, anyone can tap
+*Skip* next to their name; a player who reloads rejoins where they were.
 
 **One device.** Pass a phone around. Players take turns on the same target;
 every time stays sealed until the last player in the round has gone.
