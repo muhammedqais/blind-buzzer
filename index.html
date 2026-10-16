@@ -1,0 +1,971 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0b19">
+<title>Blind Buzzer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Rubik:wght@400;500;700&display=swap">
+<style>
+  /* Layout: one-screen stage. Studio blackout: dark indigo set, one hot buzzer red, gold for the winner. */
+  :root {
+    --bg: #0d0b19;
+    --panel: #181430;
+    --panel-2: #221c42;
+    --line: #322a5c;
+    --fg: #f4f0ff;
+    --muted: #a39bc4;
+    --buzz: #ff3b5c;
+    --buzz-hi: #ff8599;
+    --buzz-deep: #a30f2c;
+    --gold: #ffc43d;
+    --ok: #3ddc97;
+    --display: "Bungee", "Impact", "Arial Black", sans-serif;
+    --body: "Rubik", "Helvetica Neue", Arial, sans-serif;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.45;
+    display: flex;
+    flex-direction: column;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0;
+    overflow-x: hidden;
+  }
+  * { box-sizing: border-box; }
+  button { font: inherit; color: inherit; }
+  button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+  h1, h2, h3 { margin: 0; text-wrap: balance; }
+  h1 { font-family: var(--display); font-size: 18px; letter-spacing: .04em; color: var(--buzz-hi); }
+  h2 { font-family: var(--display); font-size: clamp(22px, 6vw, 34px); line-height: 1.1; }
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); font-weight: 500; }
+  p { margin: 0; }
+  .muted { color: var(--muted); }
+  .eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .14em; color: var(--muted); font-weight: 500; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding-block: 12px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  #conn { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  #conn::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  #conn.on::before { background: var(--ok); }
+
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-block: 16px; gap: 16px; }
+  #err { background: #3a1222; border: 1px solid var(--buzz-deep); color: #ffd3da; padding: 10px 12px; border-radius: 8px; font-size: 14px; }
+
+  .btn {
+    border: 1px solid var(--line); background: var(--panel-2); border-radius: 10px;
+    padding: 12px 18px; font-weight: 500; cursor: pointer; min-height: 48px;
+  }
+  .btn:hover { border-color: var(--muted); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.primary { background: var(--buzz); border-color: var(--buzz); color: #fff; font-family: var(--display); letter-spacing: .03em; }
+  .btn.gold { background: var(--gold); border-color: var(--gold); color: #2a1d00; font-family: var(--display); letter-spacing: .03em; }
+  .btn.big { font-size: 20px; min-height: 64px; flex: 1; }
+  .btn.sm { padding: 6px 12px; min-height: 36px; font-size: 14px; }
+  .link { background: none; border: 0; color: var(--muted); text-decoration: underline; cursor: pointer; padding: 8px; align-self: center; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row > .btn { flex: 1; }
+
+  .col { display: flex; flex-direction: column; gap: 14px; max-width: 480px; width: 100%; margin: 0 auto; }
+  .lede { font-size: 17px; max-width: 34em; }
+  .choices { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  @media (min-width: 560px) { .choices { grid-template-columns: 1fr 1fr; } }
+  .choice {
+    text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; min-height: 120px;
+  }
+  .choice:hover:not(:disabled) { border-color: var(--buzz); }
+  .choice:disabled { opacity: .55; cursor: default; }
+  .choice-t { font-family: var(--display); font-size: 20px; color: var(--buzz-hi); }
+  .choice-d { color: var(--muted); font-size: 14px; }
+  .hint { color: var(--muted); font-size: 14px; }
+
+  label { font-size: 13px; color: var(--muted); }
+  input[type="text"] {
+    width: 100%; padding: 14px; font-size: 18px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--fg); min-width: 0;
+  }
+  input.code { font-family: var(--display); letter-spacing: .3em; text-transform: uppercase; text-align: center; font-size: 24px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .stepper { display: flex; align-items: center; gap: 10px; }
+  .stepper .val { font-family: var(--display); font-size: 26px; min-width: 2.2ch; text-align: center; }
+  .stepper .lbl { flex: 1; }
+  .names { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .names input { padding: 10px; font-size: 15px; }
+
+  /* Stage */
+  .play { display: flex; flex-direction: column; gap: 18px; flex: 1; min-height: 0; }
+  .stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; }
+  .target { font-family: var(--display); font-size: clamp(44px, 16vw, 96px); line-height: 1; color: var(--gold); }
+  .target small { font-size: .35em; color: var(--muted); font-family: var(--body); font-weight: 500; letter-spacing: .1em; margin-left: 6px; }
+  .buzzer {
+    width: min(68vw, 280px); aspect-ratio: 1; max-width: 100%; border-radius: 50%; border: 0; cursor: pointer;
+    font-family: var(--display); font-size: clamp(28px, 8vw, 46px); color: #fff; letter-spacing: .04em;
+    background: radial-gradient(circle at 36% 30%, var(--buzz-hi), var(--buzz) 52%, var(--buzz-deep));
+    box-shadow: 0 16px 0 var(--buzz-deep), 0 28px 44px rgba(0,0,0,.6), inset 0 -6px 12px rgba(0,0,0,.25);
+    transition: transform .07s, box-shadow .07s;
+    touch-action: manipulation; user-select: none; -webkit-user-select: none; position: relative;
+  }
+  .buzzer:active { transform: translateY(12px); box-shadow: 0 4px 0 var(--buzz-deep), 0 10px 20px rgba(0,0,0,.6), inset 0 -6px 12px rgba(0,0,0,.25); }
+  .buzzer.running { background: radial-gradient(circle at 36% 30%, #5b6cff, #2f3bb8 52%, #171d63); box-shadow: 0 16px 0 #10154a, 0 28px 44px rgba(0,0,0,.6), inset 0 -6px 12px rgba(0,0,0,.25); }
+  .buzzer.running:active { box-shadow: 0 4px 0 #10154a, 0 10px 20px rgba(0,0,0,.6), inset 0 -6px 12px rgba(0,0,0,.25); }
+  .buzzer.sealed { background: radial-gradient(circle at 36% 30%, #ffd98a, var(--gold) 52%, #b8800a); box-shadow: 0 4px 0 #8a5f00, 0 10px 20px rgba(0,0,0,.6); color: #2a1d00; transform: translateY(12px); cursor: default; }
+  @media (prefers-reduced-motion: reduce) { .buzzer { transition: none; } }
+
+  /* Dial: six stops, 10s to 60s */
+  .dial { display: flex; flex-direction: column; gap: 8px; }
+  .dial-track { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
+  .dial-stop { border: 0; background: transparent; border-radius: 999px; padding: 10px 0; font-family: var(--display); font-size: 14px; color: var(--muted); cursor: pointer; min-width: 0; }
+  .dial-stop[aria-pressed="true"] { background: var(--gold); color: #2a1d00; }
+  .dial-stop:hover:not([aria-pressed="true"]) { color: var(--fg); }
+
+  .turn-name { font-family: var(--display); font-size: clamp(34px, 11vw, 64px); line-height: 1; color: var(--gold); overflow-wrap: anywhere; }
+  .btn.ready { display: flex; flex-direction: column; align-items: center; gap: 2px; line-height: 1.1; }
+  .btn.ready small { font-family: var(--body); font-size: 14px; font-weight: 500; letter-spacing: 0; text-transform: none; opacity: .9; }
+
+  .winner { font-family: var(--display); font-size: clamp(24px, 7vw, 40px); color: var(--gold); line-height: 1.1; overflow-wrap: anywhere; }
+  .codebig { font-family: var(--display); font-size: clamp(40px, 14vw, 72px); letter-spacing: .18em; color: var(--buzz-hi); line-height: 1; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; width: 100%; text-align: left; }
+  .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .list li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; background: var(--panel-2); min-width: 0; }
+  .list li.me { outline: 1px solid var(--gold); }
+  .list li.first { background: #3a2c05; }
+  .rank { font-family: var(--display); color: var(--gold); min-width: 2ch; font-size: 15px; }
+  .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .tag { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); white-space: nowrap; }
+  .tag.ok { color: var(--ok); }
+  .score { font-variant-numeric: tabular-nums; font-weight: 700; min-width: 2.5ch; text-align: right; white-space: nowrap; }
+  .diff { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; font-size: 14px; }
+  .diff.best { color: var(--gold); font-weight: 700; }
+  .rooms li { cursor: pointer; }
+  .rooms li:hover { outline: 1px solid var(--muted); }
+
+  .pill { font-size: 12px; text-transform: uppercase; letter-spacing: .12em; padding: 5px 10px; border-radius: 999px; font-weight: 700; background: var(--panel-2); color: var(--muted); }
+  .pill.live { background: var(--buzz); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .55; } }
+  details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+  details p { font-size: 14px; color: var(--muted); margin-top: 8px; }
+</style>
+
+<style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<header>
+  <h1>Blind Buzzer</h1>
+  <span id="conn">Checking…</span>
+</header>
+<main id="screen"></main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<script>if (typeof window.Peer !== 'function') { document.write('<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"><\/script>'); }</script>
+<script>
+(function () {
+  'use strict';
+
+  var MIN_TARGET = 3;
+  var DIAL_STOPS = [10, 20, 30, 40, 50, 60];
+  function snapDial(v) { return DIAL_STOPS.indexOf(v) === -1 ? 20 : v; }
+  var app = {
+    screen: 'home', db: null, user: null, me: null, dbReady: false, nick: '', err: '', busy: '',
+    code: null, room: null, players: {}, results: {}, unsubs: [], stage: null, run: { on: false, t0: 0 },
+    openRooms: [], openUnsub: null, wroteStart: false,
+    create: { rounds: 5, size: 2, maxSec: 20 }, joinCode: '',
+    local: null, lsetup: { n: 2, names: [], rounds: 5, maxSec: 20 }
+  };
+
+  var root = document.getElementById('screen');
+  var connEl = document.getElementById('conn');
+
+  // ---------- DOM helper (text only, never HTML from data) ----------
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    attrs = attrs || {};
+    Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'class') el.className = v;
+      else if (k === 'style') el.setAttribute('style', v);
+      else if (k.indexOf('on') === 0) el.addEventListener(k.slice(2), v);
+      else if (k === 'value') el.value = v;
+      else el.setAttribute(k, v === true ? '' : v);
+    });
+    for (var i = 2; i < arguments.length; i++) append(el, arguments[i]);
+    return el;
+  }
+  function append(el, kid) {
+    if (kid === null || kid === undefined || kid === false) return;
+    if (Array.isArray(kid)) { kid.forEach(function (k) { append(el, k); }); return; }
+    el.appendChild(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+
+  // ---------- sound ----------
+  var ac = null;
+  function tone(freq, dur, type, vol) {
+    try {
+      ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+      if (ac.state === 'suspended') ac.resume();
+      var o = ac.createOscillator(), g = ac.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.value = vol || 0.15;
+      o.connect(g); g.connect(ac.destination);
+      o.start();
+      g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
+      o.stop(ac.currentTime + dur);
+    } catch (e) { /* no audio here */ }
+  }
+  var sfx = {
+    unlock: function () { tone(1, 0.01, 'sine', 0.0001); },
+    start: function () { tone(660, 0.1, 'square', 0.12); },
+    stop: function () { tone(330, 0.18, 'square', 0.14); },
+    reveal: function () { [523, 659, 784, 1046].forEach(function (f, i) { setTimeout(function () { tone(f, 0.22, 'triangle', 0.16); }, i * 90); }); }
+  };
+
+  // ---------- game math ----------
+  function fmt(ms) { return (ms / 1000).toFixed(2) + 's'; }
+  function fmtDiff(ms, targetMs) {
+    var d = ms - targetMs;
+    return (d >= 0 ? '+' : '−') + (Math.abs(d) / 1000).toFixed(2) + 's';
+  }
+  function randCode() {
+    var a = 'ABCDEFGHJKLMNPQRSTUVWXYZ', s = '';
+    for (var i = 0; i < 4; i++) s += a[Math.floor(Math.random() * a.length)];
+    return s;
+  }
+  function genTargets(n, maxSec) {
+    var t = [];
+    for (var i = 0; i < n; i++) t.push(MIN_TARGET + Math.floor(Math.random() * (maxSec - MIN_TARGET + 1)));
+    return t;
+  }
+  function winners(times, targetMs) {
+    var best = Infinity, w = [];
+    Object.keys(times).forEach(function (id) {
+      var d = Math.abs(times[id] - targetMs);
+      if (d < best - 0.001) { best = d; w = [id]; }
+      else if (Math.abs(d - best) <= 0.001) w.push(id);
+    });
+    return w;
+  }
+  function tally(ids, rounds, targets, timesFor) {
+    var pts = {}, dev = {};
+    ids.forEach(function (id) { pts[id] = 0; dev[id] = 0; });
+    for (var k = 1; k <= rounds; k++) {
+      var t = timesFor(k);
+      if (!t) continue;
+      winners(t, targets[k - 1] * 1000).forEach(function (id) { pts[id]++; });
+      ids.forEach(function (id) { if (t[id] !== undefined) dev[id] += Math.abs(t[id] - targets[k - 1] * 1000); });
+    }
+    return { pts: pts, dev: dev };
+  }
+
+  // ---------- capabilities ----------
+  function useCap(name) {
+    try {
+      if (window.claude && typeof window.claude.use === 'function') {
+        return window.claude.use(name).catch(function () { return null; });
+      }
+    } catch (e) { /* fall through */ }
+    return Promise.resolve(null);
+  }
+
+  function boot(restored) {
+    try { app.nick = localStorage.getItem('bb-nick') || ''; } catch (e) { /* storage blocked */ }
+    if (restored) {
+      if (restored.nick) app.nick = restored.nick;
+      if (restored.local) { app.local = restored.local; app.screen = 'localPlay'; }
+      if (restored.lsetup) app.lsetup = restored.lsetup;
+      if (restored.create) app.create = restored.create;
+    }
+    app.lsetup.maxSec = snapDial(app.lsetup.maxSec);
+    app.create.maxSec = snapDial(app.create.maxSec);
+    render();
+    Promise.all([useCap('db'), useCap('user')]).then(function (caps) {
+      app.db = caps[0]; app.user = caps[1];
+      if (app.user) return app.user.id().then(function (id) { app.me = id; }).catch(function () {});
+    }).then(function () {
+      app.dbReady = true;
+      if (restored && restored.code && app.db && app.me) { dbNet.watch(restored.code); app.stage = restored.stage || null; app.screen = 'room'; }
+      render();
+    });
+  }
+
+  function write(fn) {
+    return fn().then(function () { app.err = ''; }).catch(function (e) {
+      var code = (e && e.code) || 'unavailable';
+      if (code === 'unavailable') {
+        return new Promise(function (res) { setTimeout(res, 300 + Math.random() * 400); })
+          .then(fn).then(function () { app.err = ''; }).catch(function (e2) { fail((e2 && e2.code) || 'unavailable'); });
+      }
+      fail(code);
+    }).then(render);
+  }
+  function fail(code) {
+    if (code === 'invalid_argument') app.err = 'This page will not save your play. Ask whoever shared it to give you edit access, then reload.';
+    else if (code === 'quota_exceeded') app.err = 'The game store is full. Start a fresh page.';
+    else app.err = 'Could not reach the room (' + code + '). Try again.';
+  }
+  function myName() {
+    var n = (app.nick || '').trim().slice(0, 20) || 'Player';
+    app.nick = n;
+    try { localStorage.setItem('bb-nick', n); } catch (e) { /* ignore */ }
+    return n;
+  }
+
+  // ---------- online rooms: two transports behind one interface ----------
+  // 'db'   : the shared database this page gets when it runs inside claude.ai
+  // 'peer' : browser to browser over WebRTC (PeerJS). The room creator's tab is the server.
+  function inClaudeViewer() { try { return !!(window.claude && typeof window.claude.use === 'function'); } catch (e) { return false; } }
+  function netMode() {
+    if (!app.dbReady) return null;
+    if (app.db && app.me) return 'db';
+    if (!inClaudeViewer() && typeof window.Peer === 'function') return 'peer';
+    return null;
+  }
+  var net = { mode: null };
+
+  function createRoom() {
+    sfx.unlock();
+    var c = app.create, name = myName(), mode = netMode();
+    if (!mode) return;
+    var doc = { code: '', rounds: c.rounds, size: c.size, maxSec: c.maxSec, targets: genTargets(c.rounds, c.maxSec),
+      status: 'open', createdAt: Date.now(), hostId: '', dropped: [] };
+    app.err = ''; app.busy = 'Creating room…'; render();
+    var p = mode === 'db' ? dbNet.create(doc, name) : peerNet.create(doc, name);
+    p.then(function (code) { app.busy = ''; enterRoom(code); }, function (e) { app.busy = ''; netFail(e); });
+  }
+  function joinRoom(code) {
+    sfx.unlock();
+    code = (code || '').trim().toUpperCase();
+    if (code.length !== 4) { app.err = 'Room codes are 4 letters.'; render(); return; }
+    var name = myName(), mode = netMode();
+    if (!mode) return;
+    app.err = ''; app.busy = 'Joining ' + code + '…'; render();
+    var p = mode === 'db' ? dbNet.join(code, name) : peerNet.join(code, name);
+    p.then(function () { app.busy = ''; enterRoom(code); }, function (e) { app.busy = ''; netFail(e); });
+  }
+  function netFail(e) {
+    if (e && e.message && !e.code) app.err = e.message; else fail((e && e.code) || 'unavailable');
+    render();
+  }
+  function enterRoom(code) {
+    app.code = code; app.stage = null; app.run = { on: false, t0: 0 }; app.screen = 'room'; render();
+  }
+  function leaveRoom(goHome) {
+    if (net.mode === 'db') dbNet.leave(); else if (net.mode === 'peer') peerNet.leave();
+    net.mode = null;
+    app.code = null; app.room = null; app.players = {}; app.results = {}; app.stage = null;
+    if (goHome) { app.screen = 'home'; render(); }
+  }
+  function submitTime(k, ms) { return net.mode === 'db' ? dbNet.submit(k, ms) : peerNet.submit(k, ms); }
+  function dropPlayer(id) { return net.mode === 'db' ? dbNet.drop(id) : peerNet.drop(id); }
+  function finishRoom() { return net.mode === 'db' ? dbNet.finish() : peerNet.finish(); }
+
+  function activeIds() {
+    var R = app.room, dropped = (R && R.dropped) || [];
+    return Object.keys(app.players).filter(function (id) { return dropped.indexOf(id) === -1; })
+      .sort(function (a, b) { return (app.players[a].joinedAt || 0) - (app.players[b].joinedAt || 0); });
+  }
+  function pname(id) { var p = app.players[id]; return (p && p.name) ? String(p.name) : 'Someone'; }
+  function roundTimes(k) {
+    var m = {};
+    activeIds().forEach(function (id) {
+      var r = app.results[id];
+      if (r && r.times && typeof r.times[k] === 'number') m[id] = r.times[k];
+    });
+    return m;
+  }
+  function allIn(k) {
+    var ids = activeIds(), t = roundTimes(k);
+    return ids.length > 0 && ids.every(function (id) { return t[id] !== undefined; });
+  }
+  function myRound() {
+    var R = app.room, r = app.results[app.me];
+    for (var k = 1; k <= R.rounds; k++) if (!(r && r.times && typeof r.times[k] === 'number')) return k;
+    return R.rounds + 1;
+  }
+  function initialStage() {
+    var R = app.room, k = myRound();
+    if (k > R.rounds) return { round: R.rounds, step: allIn(R.rounds) ? 'final' : 'wait' };
+    if (k > 1 && !allIn(k - 1)) return { round: k - 1, step: 'wait' };
+    return { round: k, step: 'ready' };
+  }
+  function roomStandings() {
+    var R = app.room, ids = activeIds();
+    var t = tally(ids, R.rounds, R.targets, function (k) { return allIn(k) ? roundTimes(k) : null; });
+    ids.sort(function (a, b) { return t.pts[b] - t.pts[a] || t.dev[a] - t.dev[b] || pname(a).localeCompare(pname(b)); });
+    return { ids: ids, pts: t.pts, dev: t.dev };
+  }
+
+  // ----- transport: shared database (inside claude.ai) -----
+  var dbNet = {
+    unsubs: [], wroteStart: false,
+    ref: function () { return app.db.doc('rooms/' + app.code); },
+    create: function (doc, name) {
+      var code = randCode(); doc.code = code; doc.hostId = app.me;
+      return app.db.doc('rooms/' + code).set(doc).then(function () {
+        return app.db.doc('rooms/' + code + '/players/' + app.me).set({ name: name, joinedAt: Date.now() });
+      }).then(function () { dbNet.watch(code); return code; });
+    },
+    join: function (code, name) {
+      var ref = app.db.doc('rooms/' + code);
+      return ref.get().then(function (s) {
+        if (!s.exists) throw { message: 'No room with code ' + code + '.' };
+        var R = s.data();
+        return ref.collection('players').get().then(function (q) {
+          var mine = q.docs.some(function (d) { return d.id === app.me; });
+          if (!mine && (R.status !== 'open' || q.size >= R.size)) throw { message: 'Room ' + code + ' is full or already playing.' };
+          return ref.collection('players').doc(app.me).set({ name: name, joinedAt: Date.now() });
+        });
+      }).then(function () { dbNet.watch(code); });
+    },
+    watch: function (code) {
+      dbNet.unsubs.forEach(function (u) { try { u(); } catch (e) { /* ignore */ } });
+      dbNet.unsubs = []; net.mode = 'db'; app.code = code; app.room = null; app.players = {}; app.results = {}; dbNet.wroteStart = false;
+      var ref = app.db.doc('rooms/' + code);
+      dbNet.unsubs.push(ref.onSnapshot(function (s) { app.room = s.exists ? s.data() : null; dbNet.checkStart(); render(); },
+        function (e) { app.err = 'Lost the room (' + e.code + '). Reload the page.'; render(); }));
+      dbNet.unsubs.push(ref.collection('players').onSnapshot(function (q) {
+        var m = {}; q.docs.forEach(function (d) { m[d.id] = d.data(); }); app.players = m; dbNet.checkStart(); render();
+      }, function (e) { app.err = 'Player list unavailable (' + e.code + ').'; render(); }));
+      dbNet.unsubs.push(ref.collection('results').onSnapshot(function (q) {
+        var m = {}; q.docs.forEach(function (d) { m[d.id] = d.data(); }); app.results = m; render();
+      }, function (e) { app.err = 'Results unavailable (' + e.code + ').'; render(); }));
+    },
+    checkStart: function () {
+      var R = app.room;
+      if (R && R.status === 'open' && !dbNet.wroteStart && activeIds().length >= R.size) {
+        dbNet.wroteStart = true;
+        dbNet.ref().update({ status: 'playing' }).catch(function () { dbNet.wroteStart = false; });
+      }
+    },
+    leave: function () {
+      dbNet.unsubs.forEach(function (u) { try { u(); } catch (e) { /* ignore */ } });
+      dbNet.unsubs = [];
+      var R = app.room;
+      if (R && R.status === 'open' && app.code && app.db) app.db.doc('rooms/' + app.code + '/players/' + app.me).delete().catch(function () {});
+    },
+    submit: function (k, ms) {
+      var mine = app.results[app.me] || {}, times = Object.assign({}, mine.times || {});
+      times[k] = ms;
+      return write(function () { return dbNet.ref().collection('results').doc(app.me).set({ times: times, name: app.nick }); });
+    },
+    drop: function (id) {
+      var d = ((app.room && app.room.dropped) || []).slice();
+      if (d.indexOf(id) === -1) d.push(id);
+      return write(function () { return dbNet.ref().update({ dropped: d }); });
+    },
+    finish: function () { if (app.room && app.room.status !== 'done') dbNet.ref().update({ status: 'done' }).catch(function () {}); }
+  };
+
+  // ----- transport: peer to peer (any browser, no accounts) -----
+  var peerNet = {
+    peer: null, conns: {}, hostConn: null, isHost: false, pid: null,
+    myPid: function () {
+      if (peerNet.pid) return peerNet.pid;
+      var id = null;
+      try { id = localStorage.getItem('bb-pid'); } catch (e) { /* ignore */ }
+      if (!id || !/^p[a-z0-9]{6,12}$/.test(id)) {
+        id = 'p' + Math.random().toString(36).slice(2, 10);
+        try { localStorage.setItem('bb-pid', id); } catch (e) { /* ignore */ }
+      }
+      peerNet.pid = id; return id;
+    },
+    describe: function (e) {
+      var t = e && e.type;
+      if (t === 'unavailable-id') return 'taken';
+      if (t === 'peer-unavailable') return 'No room with that code. Check it with the host, who must still have the page open.';
+      if (t === 'network' || t === 'server-error' || t === 'socket-error' || t === 'socket-closed') return 'Could not reach the connection service. Check your internet and try again.';
+      if (t === 'browser-incompatible') return 'This browser cannot do peer-to-peer rooms. Try Chrome, Safari or Firefox.';
+      return 'Connection problem' + (t ? ' (' + t + ')' : '') + '. Try again.';
+    },
+    open: function (id) {
+      return new Promise(function (res, rej) {
+        var p = id ? new Peer(id, { debug: 0 }) : new Peer({ debug: 0 });
+        var done = false;
+        var t = setTimeout(function () {
+          if (done) return; done = true;
+          try { p.destroy(); } catch (e) { /* ignore */ }
+          rej({ message: 'Could not reach the connection service. Check your internet and try again.' });
+        }, 12000);
+        p.on('open', function () { if (done) return; done = true; clearTimeout(t); res(p); });
+        p.on('error', function (e) {
+          if (done) return; done = true; clearTimeout(t);
+          try { p.destroy(); } catch (x) { /* ignore */ }
+          rej({ message: peerNet.describe(e) });
+        });
+      });
+    },
+    create: function (doc, name) {
+      var code = randCode();
+      return peerNet.open('bb-' + code).then(function (p) {
+        peerNet.reset(); net.mode = 'peer'; peerNet.peer = p; peerNet.isHost = true;
+        app.me = 'host'; doc.code = code; doc.hostId = 'host';
+        app.room = doc; app.players = { host: { name: name, joinedAt: Date.now() } }; app.results = {};
+        p.on('connection', peerNet.onConn);
+        p.on('error', function (e) { if (e && e.type !== 'peer-unavailable') { app.err = peerNet.describe(e); render(); } });
+        p.on('disconnected', function () { try { if (!p.destroyed) p.reconnect(); } catch (e) { /* ignore */ } });
+        return code;
+      }, function (e) {
+        if (e && e.message === 'taken') return peerNet.create(doc, name);
+        throw e;
+      });
+    },
+    onConn: function (c) {
+      c.on('open', function () { peerNet.conns[c.peer] = c; try { c.send(peerNet.snapshot()); } catch (e) { /* ignore */ } });
+      c.on('data', function (m) { peerNet.handle(c, m); });
+      c.on('close', function () { delete peerNet.conns[c.peer]; });
+      c.on('error', function () { delete peerNet.conns[c.peer]; });
+    },
+    handle: function (c, m) {
+      if (!m || typeof m !== 'object' || !app.room) return;
+      var R = app.room, pid = typeof m.pid === 'string' && /^p[a-z0-9]{6,12}$/.test(m.pid) ? m.pid : null;
+      if (!pid) return;
+      if (m.t === 'join') {
+        if (!app.players[pid]) {
+          if (R.status !== 'open' || activeIds().length >= R.size) { try { c.send({ t: 'reject' }); } catch (e) { /* ignore */ } return; }
+          app.players[pid] = { name: String(m.name || 'Player').slice(0, 20), joinedAt: Date.now() };
+          if (activeIds().length >= R.size) R.status = 'playing';
+        }
+      } else if (m.t === 'time') {
+        if (!app.players[pid]) return;
+        var k = Number(m.round), ms = Number(m.ms);
+        if (!(k >= 1 && k <= R.rounds) || !(ms >= 0 && ms < 36e5)) return;
+        var r = app.results[pid] || {}, times = Object.assign({}, r.times || {});
+        if (times[k] === undefined) times[k] = Math.round(ms);
+        app.results[pid] = { times: times };
+      } else if (m.t === 'drop') {
+        if (!app.players[pid]) return;
+        peerNet.hostDrop(String(m.id || ''));
+      } else if (m.t === 'leave') {
+        if (R.status === 'open') delete app.players[pid];
+      } else return;
+      peerNet.broadcast();
+    },
+    hostDrop: function (id) {
+      var R = app.room;
+      if (!R || !id || id === 'host' || !app.players[id]) return;
+      R.dropped = (R.dropped || []).slice();
+      if (R.dropped.indexOf(id) === -1) R.dropped.push(id);
+    },
+    snapshot: function () { return { t: 'state', room: app.room, players: app.players, results: app.results }; },
+    broadcast: function () {
+      var s = peerNet.snapshot();
+      Object.keys(peerNet.conns).forEach(function (id) { try { peerNet.conns[id].send(s); } catch (e) { /* ignore */ } });
+      render();
+    },
+    join: function (code, name) {
+      var pid = peerNet.myPid();
+      return peerNet.open(null).then(function (p) {
+        return new Promise(function (res, rej) {
+          var done = false;
+          var finish = function (err) { if (done) return; done = true; clearTimeout(t); if (err) { rej(err); peerNet.reset(); try { p.destroy(); } catch (e) { /* ignore */ } } else res(); };
+          var t = setTimeout(function () { finish({ message: 'No answer from room ' + code + '. Check the code, and that the host still has the page open.' }); }, 12000);
+          var c = p.connect('bb-' + code, { reliable: true });
+          p.on('error', function (e) { if (!done) finish({ message: peerNet.describe(e) }); else { app.err = peerNet.describe(e); render(); } });
+          p.on('disconnected', function () { try { if (!p.destroyed) p.reconnect(); } catch (e) { /* ignore */ } });
+          c.on('open', function () {
+            peerNet.reset(); net.mode = 'peer'; peerNet.peer = p; peerNet.hostConn = c; peerNet.isHost = false; app.me = pid;
+            app.room = null; app.players = {}; app.results = {};
+            try { c.send({ t: 'join', pid: pid, name: name }); } catch (e) { finish({ message: 'Could not talk to the host. Try again.' }); }
+          });
+          c.on('data', function (m) {
+            if (!m || typeof m !== 'object') return;
+            if (m.t === 'state') {
+              app.room = m.room || null; app.players = m.players || {}; app.results = m.results || {};
+              if (!done) { if (app.players[pid]) finish(null); }
+              else render();
+            } else if (m.t === 'reject') {
+              finish({ message: 'Room ' + code + ' is full or already playing.' });
+              if (done) peerNet.reset();
+            }
+          });
+          c.on('close', function () {
+            if (!done) finish({ message: 'The host closed the connection.' });
+            else if (app.screen === 'room' && net.mode === 'peer') { app.err = 'Connection to the host closed. If the host still has the page open, leave and join again with the same code to pick up where you were.'; render(); }
+          });
+        });
+      });
+    },
+    sendHost: function (m) {
+      m.pid = peerNet.myPid();
+      var ok = false;
+      try { if (peerNet.hostConn && peerNet.hostConn.open) { peerNet.hostConn.send(m); ok = true; } } catch (e) { ok = false; }
+      if (!ok) app.err = 'Not connected to the host right now. Leave and join again with the same code.';
+      render();
+    },
+    submit: function (k, ms) {
+      if (peerNet.isHost) {
+        var r = app.results.host || {}, times = Object.assign({}, r.times || {});
+        times[k] = ms; app.results.host = { times: times };
+        if (app.room && app.room.status === 'open' && activeIds().length >= app.room.size) app.room.status = 'playing';
+        peerNet.broadcast();
+      } else peerNet.sendHost({ t: 'time', round: k, ms: ms });
+      return Promise.resolve();
+    },
+    drop: function (id) { if (peerNet.isHost) { peerNet.hostDrop(id); peerNet.broadcast(); } else peerNet.sendHost({ t: 'drop', id: id }); },
+    finish: function () { if (peerNet.isHost && app.room && app.room.status !== 'done') { app.room.status = 'done'; peerNet.broadcast(); } },
+    leave: function () {
+      if (!peerNet.isHost && peerNet.hostConn) { try { peerNet.hostConn.send({ t: 'leave', pid: peerNet.myPid() }); } catch (e) { /* ignore */ } }
+      peerNet.reset();
+    },
+    reset: function () {
+      if (peerNet.peer) { try { peerNet.peer.destroy(); } catch (e) { /* ignore */ } }
+      peerNet.peer = null; peerNet.conns = {}; peerNet.hostConn = null; peerNet.isHost = false;
+    }
+  };
+
+  // ---------- the hidden stopwatch ----------
+  function startClock() {
+    if (app.run.on) return;
+    app.run = { on: true, t0: performance.now() };
+    sfx.start();
+    try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) { /* ignore */ }
+    render();
+  }
+  function stopClock() {
+    if (!app.run.on) return null;
+    var ms = Math.round(performance.now() - app.run.t0);
+    if (ms < 150) return null;
+    app.run = { on: false, t0: 0 };
+    sfx.stop();
+    try { if (navigator.vibrate) navigator.vibrate([30, 40, 30]); } catch (e) { /* ignore */ }
+    return ms;
+  }
+
+  // ---------- rendering ----------
+  function render() {
+    renderConn();
+    var focusedId = document.activeElement && document.activeElement.id;
+    var view = screens[app.screen] ? screens[app.screen]() : screens.home();
+    var kids = [];
+    if (app.err) kids.push(h('div', { id: 'err', role: 'alert' }, app.err));
+    kids.push(view);
+    root.replaceChildren.apply(root, kids);
+    if (focusedId) {
+      var el = document.getElementById(focusedId);
+      if (el && el.focus) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) { /* not a text field */ } }
+    }
+  }
+  function renderConn() {
+    var mode = netMode();
+    connEl.className = mode ? 'on' : '';
+    if (!app.dbReady) connEl.textContent = 'Checking…';
+    else if (app.code && net.mode === 'peer') connEl.textContent = 'Room ' + app.code + (peerNet.isHost ? ' · you host it' : '');
+    else if (app.code) connEl.textContent = 'Room ' + app.code;
+    else if (mode) connEl.textContent = 'Online';
+    else connEl.textContent = 'Offline · one device only';
+  }
+  function stepper(label, get, set, min, max, unit) {
+    return h('div', { class: 'stepper' },
+      h('span', { class: 'lbl' }, label),
+      h('button', { class: 'btn sm', 'aria-label': 'Fewer ' + label, onclick: function () { if (get() > min) { set(get() - 1); render(); } } }, '−'),
+      h('span', { class: 'val num' }, get() + (unit || '')),
+      h('button', { class: 'btn sm', 'aria-label': 'More ' + label, onclick: function () { if (get() < max) { set(get() + 1); render(); } } }, '+'));
+  }
+  function dial(get, set) {
+    return h('div', { class: 'dial', role: 'group', 'aria-label': 'Longest target' },
+      h('div', { class: 'stepper' }, h('span', { class: 'lbl' }, 'Longest target'), h('span', { class: 'val num' }, get() + 's')),
+      h('div', { class: 'dial-track' }, DIAL_STOPS.map(function (v) {
+        return h('button', { class: 'dial-stop', 'aria-pressed': get() === v ? 'true' : 'false', onclick: function () { set(v); render(); } }, String(v));
+      })));
+  }
+  function nameField() {
+    return h('div', { class: 'field' },
+      h('label', { for: 'nick' }, 'Your name'),
+      h('input', { id: 'nick', type: 'text', maxlength: '20', value: app.nick, placeholder: 'Name', autocomplete: 'off',
+        oninput: function (e) { app.nick = e.target.value; } }));
+  }
+  function back(to) { return h('button', { class: 'link', onclick: function () { app.err = ''; app.screen = to; render(); } }, 'Back'); }
+
+  var screens = {};
+
+  screens.home = function () {
+    var mode = netMode(), onlineOk = !!mode;
+    var onlineNote = mode === 'peer' ? 'Friends anywhere, each on their own phone. No accounts: send them this link and a room code.'
+      : mode === 'db' ? 'Friends anywhere, each on their own phone. Make a room, share the code.'
+      : app.dbReady ? (inClaudeViewer() ? 'Needs sign-in and edit access to this page. Ask whoever shared it for an invite.' : 'The connection library did not load. Check your internet and reload.')
+      : 'Checking your connection…';
+    return h('section', { class: 'col' },
+      h('p', { class: 'lede' }, 'Each round names a time, say 20 seconds. Tap to start a hidden clock, tap again when you think the time is up. Closest to the target takes the round.'),
+      h('div', { class: 'choices' },
+        h('button', { class: 'choice', id: 'c-online', disabled: !onlineOk, onclick: function () { app.err = ''; app.screen = 'online'; render(); } },
+          h('span', { class: 'choice-t' }, 'Online room'),
+          h('span', { class: 'choice-d' }, onlineNote)),
+        h('button', { class: 'choice', id: 'c-local', onclick: function () { app.err = ''; app.screen = 'localSetup'; render(); } },
+          h('span', { class: 'choice-t' }, 'One device'),
+          h('span', { class: 'choice-d' }, 'Pass one phone around. Players take turns, times stay sealed until the round ends.'))
+      ),
+      h('p', { class: 'hint' }, 'No numbers are shown while the clock runs. Count in your head, sing a song, whatever works.')
+    );
+  };
+
+  // ----- online: create or join -----
+  screens.online = function () {
+    var mode = netMode();
+    if (!app.openUnsub && mode === 'db') {
+      app.openUnsub = app.db.collection('rooms').where('status', '==', 'open').orderBy('createdAt', 'desc').limit(8)
+        .onSnapshot(function (q) { app.openRooms = q.docs.map(function (d) { return d.data(); }); render(); }, function () {});
+    }
+    var c = app.create;
+    var fresh = mode === 'db' ? app.openRooms.filter(function (r) { return r && r.code && (Date.now() - (r.createdAt || 0)) < 6 * 3600 * 1000; }) : [];
+    return h('section', { class: 'col' },
+      nameField(),
+      app.busy ? h('p', { class: 'muted', role: 'status' }, app.busy) : null,
+      h('div', { class: 'panel' },
+        h('h3', {}, 'Join a room'),
+        h('div', { class: 'row' },
+          h('input', { id: 'code', class: 'code', type: 'text', maxlength: '4', placeholder: 'CODE', value: app.joinCode, autocomplete: 'off', autocapitalize: 'characters',
+            style: 'flex:1', oninput: function (e) { app.joinCode = e.target.value.toUpperCase(); },
+            onkeydown: function (e) { if (e.key === 'Enter') joinRoom(app.joinCode); } }),
+          h('button', { class: 'btn primary', id: 'join', onclick: function () { joinRoom(app.joinCode); } }, 'Join')),
+        fresh.length ? h('ul', { class: 'list rooms' }, fresh.map(function (r) {
+          return h('li', { role: 'button', tabindex: '0', onclick: function () { joinRoom(r.code); },
+            onkeydown: function (e) { if (e.key === 'Enter') joinRoom(r.code); } },
+            h('span', { class: 'rank' }, String(r.code)),
+            h('span', { class: 'name' }, r.rounds + ' rounds · up to ' + r.maxSec + 's'),
+            h('span', { class: 'tag' }, 'waiting for ' + r.size));
+        })) : h('p', { class: 'hint' }, mode === 'db' ? 'Open rooms show up here as friends create them.' : 'Ask the host for their 4-letter code.')),
+      h('div', { class: 'panel' },
+        h('h3', {}, 'Create a room'),
+        stepper('Players', function () { return c.size; }, function (v) { c.size = v; }, 2, 8),
+        stepper('Rounds', function () { return c.rounds; }, function (v) { c.rounds = v; }, 1, 20),
+        dial(function () { return c.maxSec; }, function (v) { c.maxSec = v; }),
+        h('p', { class: 'hint' }, 'Targets are whole seconds between ' + MIN_TARGET + ' and ' + c.maxSec + '. The game starts the moment ' + c.size + ' players are in.'),
+        h('button', { class: 'btn primary big', id: 'create', onclick: createRoom }, 'Create room')),
+      h('details', {}, h('summary', {}, 'Inviting friends'),
+        h('p', {}, mode === 'peer'
+          ? 'Send friends the link to this page and your room code. They need nothing else. Your phone runs the room, so keep this page open until the game is over.'
+          : 'Share this page from its Share button and invite each friend by email with edit access. They open the link, type a name, and enter your room code. A public view-only link lets people watch but not play.')),
+      h('button', { class: 'link', onclick: function () { if (app.openUnsub) { app.openUnsub(); app.openUnsub = null; } app.err = ''; app.screen = 'home'; render(); } }, 'Back')
+    );
+  };
+
+  // ----- online: inside a room -----
+  function playersPanel(title, statusFor) {
+    var ids = activeIds();
+    return h('div', { class: 'panel' }, h('h3', {}, title),
+      ids.length ? h('ul', { class: 'list' }, ids.map(function (id) {
+        var s = statusFor ? statusFor(id) : null;
+        return h('li', { class: id === app.me ? 'me' : '' },
+          h('span', { class: 'name' }, pname(id)),
+          id === app.me ? h('span', { class: 'tag' }, 'you') : null,
+          s);
+      })) : h('p', { class: 'muted' }, 'Nobody yet.'));
+  }
+  function standingsPanel(final) {
+    var S = roomStandings();
+    return h('div', { class: 'panel' }, h('h3', {}, final ? 'Final standings' : 'Standings'),
+      h('ol', { class: 'list' }, S.ids.map(function (id, i) {
+        return h('li', { class: (i === 0 && final ? 'first ' : '') + (id === app.me ? 'me' : '') },
+          h('span', { class: 'rank' }, String(i + 1)),
+          h('span', { class: 'name' }, pname(id)),
+          h('span', { class: 'diff' }, 'off by ' + fmt(S.dev[id]) + ' total'),
+          h('span', { class: 'score' }, S.pts[id] + (S.pts[id] === 1 ? ' pt' : ' pts')));
+      })));
+  }
+  function roundResults(k, times, target, names, meId) {
+    var tMs = target * 1000, w = winners(times, tMs);
+    var ids = Object.keys(times).sort(function (a, b) { return Math.abs(times[a] - tMs) - Math.abs(times[b] - tMs); });
+    return h('div', { class: 'panel' }, h('h3', {}, 'Round ' + k + ' · target ' + target + 's'),
+      h('ol', { class: 'list' }, ids.map(function (id, i) {
+        var won = w.indexOf(id) !== -1;
+        return h('li', { class: (won ? 'first ' : '') + (id === meId ? 'me' : '') },
+          h('span', { class: 'rank' }, String(i + 1)),
+          h('span', { class: 'name' }, names(id)),
+          h('span', { class: 'score num' }, fmt(times[id])),
+          h('span', { class: 'diff' + (won ? ' best' : '') }, fmtDiff(times[id], tMs)));
+      })));
+  }
+  function clockStage(k, total, target, onStart, onStop, sealed) {
+    var running = app.run.on;
+    var btn;
+    if (sealed) btn = h('button', { class: 'buzzer sealed', disabled: true }, 'SEALED');
+    else if (running) btn = h('button', { class: 'buzzer running', id: 'clock', onpointerdown: function (e) { e.preventDefault(); onStop(); },
+      onkeydown: function (e) { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onStop(); } } }, 'STOP');
+    else btn = h('button', { class: 'buzzer', id: 'clock', onpointerdown: function (e) { e.preventDefault(); onStart(); },
+      onkeydown: function (e) { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onStart(); } } }, 'START');
+    return h('div', { class: 'stage' },
+      h('p', { class: 'eyebrow' }, 'Round ' + k + ' of ' + total),
+      h('div', { class: 'target num' }, String(target), h('small', {}, 'SECONDS')),
+      btn,
+      h('p', { class: 'muted' }, sealed ? 'Your time is locked in.' : running ? 'Clock is running. Nothing on screen will move.' : 'Tap to start. Tap again at ' + target + ' seconds.'));
+  }
+
+  screens.room = function () {
+    var R = app.room;
+    if (!R) return h('section', { class: 'col' }, h('p', { class: 'muted' }, 'Opening room ' + app.code + '…'), back('online'));
+    var ids = activeIds();
+    var started = R.status === 'playing' || R.status === 'done' || ids.length >= R.size;
+    if (!started) {
+      return h('section', { class: 'col', style: 'text-align:center' },
+        h('p', { class: 'eyebrow' }, 'Room code'),
+        h('div', { class: 'codebig' }, R.code),
+        h('p', { class: 'muted' }, ids.length + ' of ' + R.size + ' in · ' + R.rounds + (R.rounds === 1 ? ' round' : ' rounds') + ' · targets up to ' + R.maxSec + 's'),
+        h('p', {}, 'Starts on its own when ' + (R.size - ids.length) + ' more ' + (R.size - ids.length === 1 ? 'joins.' : 'join.')),
+        net.mode === 'peer' && peerNet.isHost ? h('p', { class: 'hint' }, 'Your device runs this room. Keep the page open until the game ends.') : null,
+        playersPanel('In the room'),
+        h('button', { class: 'link', onclick: function () { leaveRoom(true); } }, net.mode === 'peer' && peerNet.isHost ? 'Close room' : 'Leave room'));
+    }
+    if (!app.stage) app.stage = initialStage();
+    var S = app.stage, k = S.round, target = R.targets[k - 1];
+    if (S.step === 'wait' && allIn(k)) { S.step = 'results'; sfx.reveal(); }
+    var body;
+    if (S.step === 'ready' || S.step === 'running') {
+      body = clockStage(k, R.rounds, target, function () { S.step = 'running'; startClock(); }, function () {
+        var ms = stopClock(); if (ms === null) return;
+        S.step = 'wait'; render(); submitTime(k, ms);
+      }, false);
+    } else if (S.step === 'wait') {
+      var t = roundTimes(k);
+      body = h('div', { class: 'stage' },
+        h('p', { class: 'eyebrow' }, 'Round ' + k + ' of ' + R.rounds),
+        h('div', { class: 'target num' }, String(target), h('small', {}, 'SECONDS')),
+        h('button', { class: 'buzzer sealed', disabled: true }, 'SEALED'),
+        playersPanel('Waiting for', function (id) {
+          if (t[id] !== undefined) return h('span', { class: 'tag ok' }, 'done');
+          return h('span', { class: 'row', style: 'gap:6px;align-items:center' }, h('span', { class: 'tag' }, 'thinking'),
+            id !== app.me ? h('button', { class: 'btn sm', title: 'Continue without this player', onclick: function () { dropPlayer(id); } }, 'Skip') : null);
+        }));
+    } else if (S.step === 'results') {
+      var last = k >= R.rounds;
+      body = h('div', { class: 'stage' },
+        h('p', { class: 'eyebrow' }, 'Round ' + k + ' of ' + R.rounds + ' · revealed'),
+        (function () { var w = winners(roundTimes(k), target * 1000); return h('p', { class: 'winner' }, w.length === 1 ? (w[0] === app.me ? 'You take it' : pname(w[0]) + ' takes it') : 'Dead heat'); })(),
+        roundResults(k, roundTimes(k), target, pname, app.me),
+        standingsPanel(false),
+        h('button', { class: 'btn ' + (last ? 'gold' : 'primary') + ' big', style: 'width:100%', onclick: function () {
+          if (last) { finishRoom(); app.stage = { round: k, step: 'final' }; }
+          else app.stage = { round: k + 1, step: 'ready' };
+          render();
+        } }, last ? 'Final standings' : 'Round ' + (k + 1)));
+    } else {
+      var St = roomStandings(), champ = St.ids[0];
+      var tied = St.ids.filter(function (id) { return St.pts[id] === St.pts[champ] && St.dev[id] === St.dev[champ]; });
+      body = h('div', { class: 'stage' },
+        h('p', { class: 'eyebrow' }, 'Game over · ' + R.rounds + (R.rounds === 1 ? ' round' : ' rounds')),
+        h('p', { class: 'winner' }, tied.length > 1 ? 'Shared crown' : (champ === app.me ? 'You win' : pname(champ) + ' wins')),
+        standingsPanel(true),
+        h('details', { style: 'width:100%' }, h('summary', {}, 'Every round'),
+          (function () { var out = []; for (var r = 1; r <= R.rounds; r++) out.push(roundResults(r, roundTimes(r), R.targets[r - 1], pname, app.me)); return out; })()),
+        h('button', { class: 'btn primary big', style: 'width:100%', onclick: function () { leaveRoom(false); app.code = null; app.room = null; app.stage = null; app.screen = 'online'; render(); } }, 'Play again'));
+    }
+    return h('section', { class: 'play' }, body, h('button', { class: 'link', onclick: function () { leaveRoom(true); } }, net.mode === 'peer' && peerNet.isHost ? 'Close room for everyone' : 'Leave room'));
+  };
+
+  // ---------- one device, turn by turn ----------
+  screens.localSetup = function () {
+    var s = app.lsetup, inputs = [];
+    for (var i = 0; i < s.n; i++) {
+      (function (i) {
+        inputs.push(h('input', { id: 'ln' + i, type: 'text', maxlength: '14', placeholder: 'Player ' + (i + 1), value: s.names[i] || '', autocomplete: 'off',
+          oninput: function (e) { s.names[i] = e.target.value; } }));
+      })(i);
+    }
+    return h('section', { class: 'col' },
+      h('h2', {}, 'One device'),
+      h('div', { class: 'panel' },
+        stepper('Players', function () { return s.n; }, function (v) { s.n = v; }, 2, 8),
+        h('div', { class: 'names' }, inputs),
+        stepper('Rounds', function () { return s.rounds; }, function (v) { s.rounds = v; }, 1, 20),
+        dial(function () { return s.maxSec; }, function (v) { s.maxSec = v; })),
+      h('p', { class: 'hint' }, 'Players take turns on the same target. Each time stays sealed until everyone in the round has gone.'),
+      h('button', { class: 'btn primary big', id: 'start', onclick: function () {
+        sfx.unlock();
+        var names = []; for (var i = 0; i < s.n; i++) names.push((s.names[i] || '').trim().slice(0, 14) || 'Player ' + (i + 1));
+        app.local = { names: names, rounds: s.rounds, maxSec: s.maxSec, targets: genTargets(s.rounds, s.maxSec), round: 1, turn: 0, step: 'pass', times: [] };
+        app.run = { on: false, t0: 0 };
+        app.screen = 'localPlay'; render();
+      } }, 'Start'),
+      back('home'));
+  };
+
+  function localTimes(k) { var L = app.local, t = L.times[k - 1]; if (!t) return null; var m = {}; t.forEach(function (ms, i) { if (typeof ms === 'number') m[String(i)] = ms; }); return m; }
+  function localStandings() {
+    var L = app.local, ids = L.names.map(function (_, i) { return String(i); });
+    var t = tally(ids, L.rounds, L.targets, function (k) { var m = localTimes(k); return m && Object.keys(m).length === L.names.length ? m : null; });
+    ids.sort(function (a, b) { return t.pts[b] - t.pts[a] || t.dev[a] - t.dev[b] || a - b; });
+    return { ids: ids, pts: t.pts, dev: t.dev };
+  }
+  function localName(id) { return app.local.names[Number(id)]; }
+
+  screens.localPlay = function () {
+    var L = app.local;
+    if (!L) { app.screen = 'localSetup'; return screens.localSetup(); }
+    var k = L.round, target = L.targets[k - 1], who = L.names[L.turn], body;
+    if (L.step === 'pass') {
+      body = h('div', { class: 'stage' },
+        h('p', { class: 'eyebrow' }, 'Round ' + k + ' of ' + L.rounds + ' · turn ' + (L.turn + 1) + ' of ' + L.names.length),
+        h('p', { class: 'eyebrow' }, 'Pass the phone to'),
+        h('p', { class: 'turn-name' }, who),
+        h('p', { class: 'muted' }, 'Target this round'),
+        h('div', { class: 'target num' }, String(target), h('small', {}, 'SECONDS')),
+        h('button', { class: 'btn primary big ready', id: 'ready', style: 'width:100%', onclick: function () { L.step = 'ready'; render(); } },
+          'READY', h('small', {}, 'Only ' + who + ' taps this')));
+    } else if (L.step === 'ready' || L.step === 'running') {
+      body = h('div', { class: 'stage' },
+        h('p', { class: 'eyebrow' }, 'Now playing'),
+        h('p', { class: 'turn-name', style: 'font-size:clamp(22px,7vw,36px)' }, who),
+        clockStage(k, L.rounds, target, function () { L.step = 'running'; startClock(); }, function () {
+          var ms = stopClock(); if (ms === null) return;
+          if (!L.times[k - 1]) L.times[k - 1] = [];
+          L.times[k - 1][L.turn] = ms;
+          if (L.turn < L.names.length - 1) { L.turn++; L.step = 'pass'; }
+          else { L.step = 'results'; sfx.reveal(); }
+          render();
+        }, false));
+    } else if (L.step === 'results') {
+      var last = k >= L.rounds, times = localTimes(k), w = winners(times, target * 1000), S = localStandings();
+      body = h('div', { class: 'stage' },
+        h('p', { class: 'eyebrow' }, 'Round ' + k + ' of ' + L.rounds + ' · revealed'),
+        h('p', { class: 'winner' }, w.length === 1 ? localName(w[0]) + ' takes it' : 'Dead heat'),
+        roundResults(k, times, target, localName, null),
+        h('div', { class: 'panel' }, h('h3', {}, 'Standings'), h('ol', { class: 'list' }, S.ids.map(function (id, i) {
+          return h('li', {}, h('span', { class: 'rank' }, String(i + 1)), h('span', { class: 'name' }, localName(id)),
+            h('span', { class: 'diff' }, 'off by ' + fmt(S.dev[id]) + ' total'), h('span', { class: 'score' }, S.pts[id] + (S.pts[id] === 1 ? ' pt' : ' pts')));
+        }))),
+        h('button', { class: 'btn ' + (last ? 'gold' : 'primary') + ' big', style: 'width:100%', onclick: function () {
+          if (last) L.step = 'final'; else { L.round++; L.turn = 0; L.step = 'pass'; }
+          render();
+        } }, last ? 'Final standings' : 'Round ' + (k + 1)));
+    } else {
+      var F = localStandings(), champ = F.ids[0];
+      var tiedL = F.ids.filter(function (id) { return F.pts[id] === F.pts[champ] && F.dev[id] === F.dev[champ]; });
+      body = h('div', { class: 'stage' },
+        h('p', { class: 'eyebrow' }, 'Game over · ' + L.rounds + (L.rounds === 1 ? ' round' : ' rounds')),
+        h('p', { class: 'winner' }, tiedL.length > 1 ? 'Shared crown' : localName(champ) + ' wins'),
+        h('div', { class: 'panel' }, h('h3', {}, 'Final standings'), h('ol', { class: 'list' }, F.ids.map(function (id, i) {
+          return h('li', { class: i === 0 ? 'first' : '' }, h('span', { class: 'rank' }, String(i + 1)), h('span', { class: 'name' }, localName(id)),
+            h('span', { class: 'diff' }, 'off by ' + fmt(F.dev[id]) + ' total'), h('span', { class: 'score' }, F.pts[id] + (F.pts[id] === 1 ? ' pt' : ' pts')));
+        }))),
+        h('details', { style: 'width:100%' }, h('summary', {}, 'Every round'),
+          (function () { var out = []; for (var r = 1; r <= L.rounds; r++) out.push(roundResults(r, localTimes(r) || {}, L.targets[r - 1], localName, null)); return out; })()),
+        h('button', { class: 'btn primary big', style: 'width:100%', onclick: function () { app.local = null; app.screen = 'localSetup'; render(); } }, 'Play again'));
+    }
+    return h('section', { class: 'play' }, body,
+      h('button', { class: 'link', onclick: function () { app.local = null; app.run = { on: false, t0: 0 }; app.screen = 'localSetup'; render(); } }, 'Quit game'));
+  };
+
+  // ---------- start (survives live republishes where the viewer supports it) ----------
+  try {
+    var hot = window.claude && window.claude.hot;
+    if (hot && typeof hot.snapshot === 'function') {
+      hot.snapshot(function () { return { nick: app.nick, code: app.code, stage: app.stage, local: app.local, lsetup: app.lsetup, create: app.create }; });
+    }
+    if (hot && typeof hot.ready === 'function') hot.ready(boot);
+    else boot((hot && hot.data) || {});
+  } catch (e) { boot({}); }
+})();
+</script>
+</body>
+</html>
