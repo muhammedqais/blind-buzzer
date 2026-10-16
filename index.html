@@ -56,6 +56,13 @@
     padding-block: 12px 8px;
     border-bottom: 1px solid var(--line);
   }
+  .hl { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .back {
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--fg); border-radius: 999px;
+    padding: 8px 14px 8px 10px; min-height: 40px; font-weight: 500; cursor: pointer; white-space: nowrap;
+  }
+  .back:hover { border-color: var(--muted); }
+  .back.warn { background: var(--buzz); border-color: var(--buzz); color: #fff; }
   #conn { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
   #conn::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
   #conn.on::before { background: var(--ok); }
@@ -179,7 +186,10 @@
 </head>
 <body>
 <header>
-  <h1>Blind Buzzer</h1>
+  <div class="hl">
+    <button id="back" class="back" type="button" hidden>‹ Back</button>
+    <h1>Blind Buzzer</h1>
+  </div>
   <span id="conn">Checking…</span>
 </header>
 <main id="screen"></main>
@@ -786,8 +796,40 @@
   }
 
   // ---------- rendering ----------
+  var backEl = document.getElementById('back'), backTimer = null;
+  // Top-left back button. Leaving a live game asks for a second tap within 3 seconds.
+  function backSpec() {
+    switch (app.screen) {
+      case 'online': return { label: '‹ Back', go: function () { if (app.openUnsub) { app.openUnsub(); app.openUnsub = null; } app.err = ''; app.screen = 'home'; render(); } };
+      case 'localSetup': return { label: '‹ Back', go: function () { app.err = ''; app.screen = 'home'; render(); } };
+      case 'room': {
+        var host = net.mode === 'peer' && peerNet.isHost, inGame = !!(app.room && app.room.status !== 'open');
+        return { label: host ? '‹ Close room' : '‹ Leave', confirm: inGame, ask: host ? 'Close for all?' : 'Leave game?', go: function () { leaveRoom(true); } };
+      }
+      case 'localPlay': return { label: '‹ Quit', confirm: !!(app.local && app.local.step !== 'final'), ask: 'Quit game?', go: function () {
+        app.lsetup.solo = !!(app.local && app.local.solo); app.local = null; app.run = { on: false, t0: 0 }; app.screen = 'localSetup'; render(); } };
+      default: return null;
+    }
+  }
+  function renderBack() {
+    var spec = backSpec();
+    if (!spec) { backEl.hidden = true; app.confirmBack = false; return; }
+    backEl.hidden = false;
+    backEl.className = 'back' + (app.confirmBack ? ' warn' : '');
+    backEl.textContent = app.confirmBack ? spec.ask : spec.label;
+  }
+  backEl.addEventListener('click', function () {
+    var spec = backSpec(); if (!spec) return;
+    if (spec.confirm && !app.confirmBack) {
+      app.confirmBack = true; renderBack();
+      clearTimeout(backTimer); backTimer = setTimeout(function () { app.confirmBack = false; renderBack(); }, 3000);
+      return;
+    }
+    clearTimeout(backTimer); app.confirmBack = false; spec.go();
+  });
   function render() {
     if (app.screen === 'localPlay' && app.local) lsSet('bb-local', { local: app.local }); else if (!app.local) lsSet('bb-local', null);
+    renderBack();
     renderConn();
     var focusedId = document.activeElement && document.activeElement.id;
     var view = screens[app.screen] ? screens[app.screen]() : screens.home();
@@ -907,7 +949,7 @@
         h('p', {}, mode === 'peer'
           ? 'Send friends the link to this page and your room code. They need nothing else. Your phone runs the room, so keep this page open until the game is over.'
           : 'Share this page from its Share button and invite each friend by email with edit access. They open the link, type a name, and enter your room code. A public view-only link lets people watch but not play.')),
-      h('button', { class: 'link', onclick: function () { if (app.openUnsub) { app.openUnsub(); app.openUnsub = null; } app.err = ''; app.screen = 'home'; render(); } }, 'Back')
+      null
     );
   };
 
@@ -964,7 +1006,7 @@
 
   screens.room = function () {
     var R = app.room;
-    if (!R) return h('section', { class: 'col' }, h('p', { class: 'muted' }, 'Opening room ' + app.code + '…'), back('online'));
+    if (!R) return h('section', { class: 'col' }, h('p', { class: 'muted' }, 'Opening room ' + app.code + '…'));
     var ids = activeIds();
     var started = R.status === 'playing' || R.status === 'done' || ids.length >= R.size;
     if (!started) {
@@ -974,8 +1016,7 @@
         h('p', { class: 'muted' }, ids.length + ' of ' + R.size + ' in · ' + R.rounds + (R.rounds === 1 ? ' round' : ' rounds') + ' · ' + styleName(R.style) + ' up to ' + R.maxSec + 's'),
         h('p', {}, 'Starts on its own when ' + (R.size - ids.length) + ' more ' + (R.size - ids.length === 1 ? 'joins.' : 'join.')),
         net.mode === 'peer' && peerNet.isHost ? h('p', { class: 'hint' }, 'Your device runs this room. Keep the page open until the game ends.') : null,
-        playersPanel('In the room'),
-        h('button', { class: 'link', onclick: function () { leaveRoom(true); } }, net.mode === 'peer' && peerNet.isHost ? 'Close room' : 'Leave room'));
+        playersPanel('In the room'));
     }
     var g = R.game || 0;
     if (app.gameSeen !== g) {
@@ -1035,7 +1076,7 @@
         h('button', { class: 'btn primary big', style: 'width:100%', onclick: playAgain }, 'Play again'),
         h('p', { class: 'hint' }, 'Same room, same players, new targets. Anyone can start it.'));
     }
-    return h('section', { class: 'play' }, body, h('button', { class: 'link', onclick: function () { leaveRoom(true); } }, net.mode === 'peer' && peerNet.isHost ? 'Close room for everyone' : 'Leave room'));
+    return h('section', { class: 'play' }, body);
   };
 
   // ---------- one device, turn by turn ----------
@@ -1066,8 +1107,7 @@
         app.local = { names: names, rounds: s.rounds, maxSec: s.maxSec, targets: genTargets(s.rounds, s.maxSec, s.style), style: s.style, round: 1, turn: 0, step: solo ? 'ready' : 'pass', times: [], solo: solo, retries: names.map(function () { return 0; }) };
         app.run = { on: false, t0: 0 };
         app.screen = 'localPlay'; render();
-      } }, 'Start'),
-      back('home'));
+      } }, 'Start'));
   };
 
   function localTimes(k) { var L = app.local, t = L.times[k - 1]; if (!t) return null; var m = {}; t.forEach(function (ms, i) { if (typeof ms === 'number') m[String(i)] = ms; }); return m; }
@@ -1187,8 +1227,7 @@
           (function () { var out = []; for (var r = 1; r <= L.rounds; r++) out.push(roundResults(r, localTimes(r) || {}, L.targets[r - 1], localName, null)); return out; })()),
         h('button', { class: 'btn primary big', style: 'width:100%', onclick: function () { app.local = null; app.screen = 'localSetup'; render(); } }, 'Play again'));
     }
-    return h('section', { class: 'play' }, body,
-      h('button', { class: 'link', onclick: function () { app.lsetup.solo = !!L.solo; app.local = null; app.run = { on: false, t0: 0 }; app.screen = 'localSetup'; render(); } }, 'Quit game'));
+    return h('section', { class: 'play' }, body);
   };
 
   // ---------- start (survives live republishes where the viewer supports it) ----------
