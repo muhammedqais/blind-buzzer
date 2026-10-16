@@ -120,7 +120,7 @@
   .buzzer:active { transform: translateY(12px); box-shadow: 0 4px 0 var(--buzz-deep), 0 10px 20px rgba(0,0,0,.6), inset 0 -6px 12px rgba(0,0,0,.25); }
   .buzzer.running { background: radial-gradient(circle at 36% 30%, #5b6cff, #2f3bb8 52%, #171d63); box-shadow: 0 16px 0 #10154a, 0 28px 44px rgba(0,0,0,.6), inset 0 -6px 12px rgba(0,0,0,.25); }
   .buzzer.running:active { box-shadow: 0 4px 0 #10154a, 0 10px 20px rgba(0,0,0,.6), inset 0 -6px 12px rgba(0,0,0,.25); }
-  .buzzer.sealed { background: radial-gradient(circle at 36% 30%, #ffd98a, var(--gold) 52%, #b8800a); box-shadow: 0 4px 0 #8a5f00, 0 10px 20px rgba(0,0,0,.6); color: #2a1d00; transform: translateY(12px); cursor: default; }
+  .buzzer.sealed { font-size: clamp(22px, 6.5vw, 38px); background: radial-gradient(circle at 36% 30%, #ffd98a, var(--gold) 52%, #b8800a); box-shadow: 0 4px 0 #8a5f00, 0 10px 20px rgba(0,0,0,.6); color: #2a1d00; transform: translateY(12px); cursor: default; }
   @media (prefers-reduced-motion: reduce) { .buzzer { transition: none; } }
 
   /* Dial: six stops, 10s to 60s */
@@ -359,7 +359,7 @@
     render();
   }
   function enterRoom(code) {
-    app.code = code; app.stage = null; app.run = { on: false, t0: 0 }; app.screen = 'room'; render();
+    app.code = code; app.stage = null; app.gameSeen = -1; app.run = { on: false, t0: 0 }; app.screen = 'room'; render();
   }
   function leaveRoom(goHome) {
     if (net.mode === 'db') dbNet.leave(); else if (net.mode === 'peer') peerNet.leave();
@@ -368,6 +368,9 @@
     if (goHome) { app.screen = 'home'; render(); }
   }
   function submitTime(k, ms) { return net.mode === 'db' ? dbNet.submit(k, ms) : peerNet.submit(k, ms); }
+  function playAgain() { return net.mode === 'db' ? dbNet.again() : peerNet.again(); }
+  // Times are keyed by game number and round, so "play again" in the same room starts clean.
+  function tkey(k) { return ((app.room && app.room.game) || 0) + ':' + k; }
   function dropPlayer(id) { return net.mode === 'db' ? dbNet.drop(id) : peerNet.drop(id); }
   function finishRoom() { return net.mode === 'db' ? dbNet.finish() : peerNet.finish(); }
 
@@ -381,7 +384,7 @@
     var m = {};
     activeIds().forEach(function (id) {
       var r = app.results[id];
-      if (r && r.times && typeof r.times[k] === 'number') m[id] = r.times[k];
+      if (r && r.times && typeof r.times[tkey(k)] === 'number') m[id] = r.times[tkey(k)];
     });
     return m;
   }
@@ -391,7 +394,7 @@
   }
   function myRound() {
     var R = app.room, r = app.results[app.me];
-    for (var k = 1; k <= R.rounds; k++) if (!(r && r.times && typeof r.times[k] === 'number')) return k;
+    for (var k = 1; k <= R.rounds; k++) if (!(r && r.times && typeof r.times[tkey(k)] === 'number')) return k;
     return R.rounds + 1;
   }
   function initialStage() {
@@ -457,8 +460,12 @@
     },
     submit: function (k, ms) {
       var mine = app.results[app.me] || {}, times = Object.assign({}, mine.times || {});
-      times[k] = ms;
+      times[tkey(k)] = ms;
       return write(function () { return dbNet.ref().collection('results').doc(app.me).set({ times: times, name: app.nick }); });
+    },
+    again: function () {
+      var R = app.room;
+      return write(function () { return dbNet.ref().update({ game: (R.game || 0) + 1, targets: genTargets(R.rounds, R.maxSec), dropped: [], status: 'playing' }); });
     },
     drop: function (id) {
       var d = ((app.room && app.room.dropped) || []).slice();
@@ -542,8 +549,11 @@
         var k = Number(m.round), ms = Number(m.ms);
         if (!(k >= 1 && k <= R.rounds) || !(ms >= 0 && ms < 36e5)) return;
         var r = app.results[pid] || {}, times = Object.assign({}, r.times || {});
-        if (times[k] === undefined) times[k] = Math.round(ms);
+        if (times[tkey(k)] === undefined) times[tkey(k)] = Math.round(ms);
         app.results[pid] = { times: times };
+      } else if (m.t === 'again') {
+        if (!app.players[pid]) return;
+        peerNet.restart();
       } else if (m.t === 'drop') {
         if (!app.players[pid]) return;
         peerNet.hostDrop(String(m.id || ''));
@@ -552,6 +562,12 @@
       } else return;
       peerNet.broadcast();
     },
+    restart: function () {
+      var R = app.room; if (!R) return;
+      R.game = (R.game || 0) + 1; R.targets = genTargets(R.rounds, R.maxSec); R.dropped = []; R.status = 'playing';
+      app.results = {};
+    },
+    again: function () { if (peerNet.isHost) { peerNet.restart(); peerNet.broadcast(); } else peerNet.sendHost({ t: 'again' }); },
     hostDrop: function (id) {
       var R = app.room;
       if (!R || !id || id === 'host' || !app.players[id]) return;
@@ -607,7 +623,7 @@
     submit: function (k, ms) {
       if (peerNet.isHost) {
         var r = app.results.host || {}, times = Object.assign({}, r.times || {});
-        times[k] = ms; app.results.host = { times: times };
+        times[tkey(k)] = ms; app.results.host = { times: times };
         if (app.room && app.room.status === 'open' && activeIds().length >= app.room.size) app.room.status = 'playing';
         peerNet.broadcast();
       } else peerNet.sendHost({ t: 'time', round: k, ms: ms });
@@ -790,7 +806,7 @@
   function clockStage(k, total, target, onStart, onStop, sealed) {
     var running = app.run.on;
     var btn;
-    if (sealed) btn = h('button', { class: 'buzzer sealed', disabled: true }, 'SEALED');
+    if (sealed) btn = h('button', { class: 'buzzer sealed', disabled: true }, 'WAITING');
     else if (running) btn = h('button', { class: 'buzzer running', id: 'clock', onpointerdown: function (e) { e.preventDefault(); onStop(); },
       onkeydown: function (e) { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onStop(); } } }, 'STOP');
     else btn = h('button', { class: 'buzzer', id: 'clock', onpointerdown: function (e) { e.preventDefault(); onStart(); },
@@ -817,6 +833,11 @@
         playersPanel('In the room'),
         h('button', { class: 'link', onclick: function () { leaveRoom(true); } }, net.mode === 'peer' && peerNet.isHost ? 'Close room' : 'Leave room'));
     }
+    var g = R.game || 0;
+    if (app.gameSeen !== g) {
+      if (app.gameSeen !== undefined && app.gameSeen !== -1) { app.stage = null; app.run = { on: false, t0: 0 }; sfx.start(); }
+      app.gameSeen = g;
+    }
     if (!app.stage) app.stage = initialStage();
     var S = app.stage, k = S.round, target = R.targets[k - 1];
     if (S.step === 'wait' && allIn(k)) { S.step = 'results'; sfx.reveal(); }
@@ -828,10 +849,12 @@
       }, false);
     } else if (S.step === 'wait') {
       var t = roundTimes(k);
+      var pending = activeIds().filter(function (id) { return t[id] === undefined && id !== app.me; }).map(pname);
       body = h('div', { class: 'stage' },
         h('p', { class: 'eyebrow' }, 'Round ' + k + ' of ' + R.rounds),
         h('div', { class: 'target num' }, String(target), h('small', {}, 'SECONDS')),
-        h('button', { class: 'buzzer sealed', disabled: true }, 'SEALED'),
+        h('button', { class: 'buzzer sealed', disabled: true }, 'WAITING'),
+        h('p', { class: 'muted' }, pending.length ? 'Waiting for ' + pending.join(', ') + '…' : 'Your time is in.'),
         playersPanel('Waiting for', function (id) {
           if (t[id] !== undefined) return h('span', { class: 'tag ok' }, 'done');
           return h('span', { class: 'row', style: 'gap:6px;align-items:center' }, h('span', { class: 'tag' }, 'thinking'),
@@ -858,7 +881,8 @@
         standingsPanel(true),
         h('details', { style: 'width:100%' }, h('summary', {}, 'Every round'),
           (function () { var out = []; for (var r = 1; r <= R.rounds; r++) out.push(roundResults(r, roundTimes(r), R.targets[r - 1], pname, app.me)); return out; })()),
-        h('button', { class: 'btn primary big', style: 'width:100%', onclick: function () { leaveRoom(false); app.code = null; app.room = null; app.stage = null; app.screen = 'online'; render(); } }, 'Play again'));
+        h('button', { class: 'btn primary big', style: 'width:100%', onclick: playAgain }, 'Play again'),
+        h('p', { class: 'hint' }, 'Same room, same players, new targets. Anyone can start it.'));
     }
     return h('section', { class: 'play' }, body, h('button', { class: 'link', onclick: function () { leaveRoom(true); } }, net.mode === 'peer' && peerNet.isHost ? 'Close room for everyone' : 'Leave room'));
   };
