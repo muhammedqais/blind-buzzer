@@ -415,6 +415,16 @@
   }
   function submitTime(k, ms) { return net.mode === 'db' ? dbNet.submit(k, ms) : peerNet.submit(k, ms); }
   function playAgain() { return net.mode === 'db' ? dbNet.again() : peerNet.again(); }
+  // Two retries per player per game: withdraw your sealed time and run the round again, while others are still thinking.
+  var RETRIES = 2;
+  function gameKey() { return String((app.room && app.room.game) || 0); }
+  function retriesUsed(id) { var r = app.results[id]; return (r && r.retries && r.retries[gameKey()]) || 0; }
+  function retriesLeft(id) { return Math.max(0, RETRIES - retriesUsed(id)); }
+  function retryRound(k) {
+    if (retriesLeft(app.me) <= 0 || allIn(k) || roundTimes(k)[app.me] === undefined) return;
+    app.retryPending = k; app.stage = { round: k, step: 'ready' }; app.run = { on: false, t0: 0 }; sfx.start(); render();
+    if (net.mode === 'db') dbNet.retry(k); else peerNet.retry(k);
+  }
   // Times are keyed by game number and round, so "play again" in the same room starts clean.
   function tkey(k) { return ((app.room && app.room.game) || 0) + ':' + k; }
   function dropPlayer(id) { return net.mode === 'db' ? dbNet.drop(id) : peerNet.drop(id); }
@@ -507,7 +517,12 @@
     submit: function (k, ms) {
       var mine = app.results[app.me] || {}, times = Object.assign({}, mine.times || {});
       times[tkey(k)] = ms;
-      return write(function () { return dbNet.ref().collection('results').doc(app.me).set({ times: times, name: app.nick }); });
+      return write(function () { return dbNet.ref().collection('results').doc(app.me).set({ times: times, retries: mine.retries || {}, name: app.nick }); });
+    },
+    retry: function (k) {
+      var mine = app.results[app.me] || {}, times = Object.assign({}, mine.times || {}), rt = Object.assign({}, mine.retries || {}), g = gameKey();
+      delete times[tkey(k)]; rt[g] = (rt[g] || 0) + 1;
+      return write(function () { return dbNet.ref().collection('results').doc(app.me).set({ times: times, retries: rt, name: app.nick }); });
     },
     again: function () {
       var R = app.room;
@@ -624,7 +639,11 @@
         if (!(k >= 1 && k <= R.rounds) || !(ms >= 0 && ms < 36e5)) return;
         var r = app.results[pid] || {}, times = Object.assign({}, r.times || {});
         if (times[tkey(k)] === undefined) times[tkey(k)] = Math.round(ms);
-        app.results[pid] = { times: times };
+        app.results[pid] = Object.assign({}, r, { times: times });
+      } else if (m.t === 'retry') {
+        if (!app.players[pid]) return;
+        var kr = Number(m.round);
+        if (!(kr >= 1 && kr <= R.rounds) || !peerNet.hostRetry(pid, kr)) return;
       } else if (m.t === 'again') {
         if (!app.players[pid]) return;
         peerNet.restart();
@@ -636,6 +655,17 @@
       } else return;
       peerNet.broadcast();
     },
+    hostRetry: function (id, k) {
+      var r = app.results[id];
+      if (!r || !r.times || r.times[tkey(k)] === undefined || allIn(k)) return false;
+      var rt = Object.assign({}, r.retries || {}), g = gameKey();
+      if ((rt[g] || 0) >= RETRIES) return false;
+      rt[g] = (rt[g] || 0) + 1;
+      var times = Object.assign({}, r.times); delete times[tkey(k)];
+      app.results[id] = Object.assign({}, r, { times: times, retries: rt });
+      return true;
+    },
+    retry: function (k) { if (peerNet.isHost) { if (peerNet.hostRetry('host', k)) peerNet.broadcast(); } else peerNet.sendHost({ t: 'retry', round: k }); },
     restart: function () {
       var R = app.room; if (!R) return;
       R.game = (R.game || 0) + 1; R.targets = genTargets(R.rounds, R.maxSec, R.style); R.dropped = []; R.status = 'playing';
@@ -698,7 +728,7 @@
     submit: function (k, ms) {
       if (peerNet.isHost) {
         var r = app.results.host || {}, times = Object.assign({}, r.times || {});
-        times[tkey(k)] = ms; app.results.host = { times: times };
+        times[tkey(k)] = ms; app.results.host = Object.assign({}, r, { times: times });
         if (app.room && app.room.status === 'open' && activeIds().length >= app.room.size) app.room.status = 'playing';
         peerNet.broadcast();
       } else peerNet.sendHost({ t: 'time', round: k, ms: ms });
@@ -927,6 +957,10 @@
     }
     if (!app.stage) app.stage = initialStage();
     var S = app.stage, k = S.round, target = R.targets[k - 1];
+    if (app.retryPending === k) {
+      if (roundTimes(k)[app.me] === undefined) app.retryPending = null;
+      else if (allIn(k)) { app.retryPending = null; S.step = 'wait'; }
+    }
     if (S.step === 'wait' && allIn(k)) { S.step = 'results'; sfx.reveal(); }
     var body;
     if (S.step === 'ready' || S.step === 'running') {
@@ -942,6 +976,9 @@
         h('div', { class: 'target num' }, fmtT(target), h('small', {}, 'SECONDS')),
         h('button', { class: 'buzzer sealed', disabled: true }, 'WAITING'),
         h('p', { class: 'muted' }, pending.length ? 'Waiting for ' + pending.join(', ') + '…' : 'Your time is in.'),
+        pending.length && t[app.me] !== undefined ? (retriesLeft(app.me) > 0
+          ? h('button', { class: 'btn', id: 'retry', onclick: function () { retryRound(k); } }, 'Retry this round · ' + retriesLeft(app.me) + ' left')
+          : h('p', { class: 'hint' }, 'No retries left this game.')) : null,
         playersPanel('Waiting for', function (id) {
           if (t[id] !== undefined) return h('span', { class: 'tag ok' }, 'done');
           return h('span', { class: 'row', style: 'gap:6px;align-items:center' }, h('span', { class: 'tag' }, 'thinking'),
@@ -999,7 +1036,7 @@
         sfx.unlock();
         var names = []; for (var i = 0; i < s.n; i++) names.push((s.names[i] || '').trim().slice(0, 14) || 'Player ' + (i + 1));
         if (solo) names = ['You'];
-        app.local = { names: names, rounds: s.rounds, maxSec: s.maxSec, targets: genTargets(s.rounds, s.maxSec, s.style), style: s.style, round: 1, turn: 0, step: solo ? 'ready' : 'pass', times: [], solo: solo };
+        app.local = { names: names, rounds: s.rounds, maxSec: s.maxSec, targets: genTargets(s.rounds, s.maxSec, s.style), style: s.style, round: 1, turn: 0, step: solo ? 'ready' : 'pass', times: [], solo: solo, retries: names.map(function () { return 0; }) };
         app.run = { on: false, t0: 0 };
         app.screen = 'localPlay'; render();
       } }, 'Start'),
@@ -1037,10 +1074,24 @@
           var ms = stopClock(); if (ms === null) return;
           if (!L.times[k - 1]) L.times[k - 1] = [];
           L.times[k - 1][L.turn] = ms;
-          if (L.turn < L.names.length - 1) { L.turn++; L.step = 'pass'; }
-          else { L.step = 'results'; sfx.reveal(); }
+          L.step = 'locked';
           render();
         }, false));
+    } else if (L.step === 'locked') {
+      if (!L.retries) L.retries = L.names.map(function () { return 0; });
+      var left = RETRIES - (L.retries[L.turn] || 0);
+      body = h('div', { class: 'stage' },
+        h('p', { class: 'eyebrow' }, 'Round ' + k + ' of ' + L.rounds),
+        L.solo ? null : h('p', { class: 'turn-name', style: 'font-size:clamp(22px,7vw,36px)' }, who),
+        h('button', { class: 'buzzer sealed', disabled: true }, 'LOCKED'),
+        h('p', { class: 'muted' }, left > 0 ? 'Happy with it? Or run this round again.' : 'No retries left this game.'),
+        h('div', { class: 'row', style: 'width:100%' },
+          left > 0 ? h('button', { class: 'btn', id: 'lretry', onclick: function () { L.retries[L.turn] = (L.retries[L.turn] || 0) + 1; L.times[k - 1][L.turn] = undefined; L.step = 'ready'; sfx.start(); render(); } }, 'Retry · ' + left + ' left') : null,
+          h('button', { class: 'btn primary', id: 'lcontinue', onclick: function () {
+            if (L.turn < L.names.length - 1) { L.turn++; L.step = 'pass'; }
+            else { L.step = 'results'; sfx.reveal(); }
+            render();
+          } }, L.solo ? 'See result' : (L.turn < L.names.length - 1 ? 'Pass to ' + L.names[L.turn + 1] : 'Reveal the round'))));
     } else if (L.step === 'results' && L.solo) {
       var lastS = k >= L.rounds, msS = L.times[k - 1][0], dS = Math.abs(msS - target * 1000);
       var doneRounds = L.times.filter(function (t) { return t && typeof t[0] === 'number'; });
@@ -1078,7 +1129,7 @@
             return h('li', {}, h('span', { class: 'rank' }, String(i + 1)), h('span', { class: 'name' }, 'Target ' + fmtT(L.targets[i]) + 's'), h('span', { class: 'score num' }, fmt(t[0])), h('span', { class: 'diff' }, fmtDiff(t[0], L.targets[i] * 1000)));
           }))),
         h('button', { class: 'btn primary big', style: 'width:100%', onclick: function () {
-          app.local = { names: ['You'], rounds: L.rounds, maxSec: L.maxSec, targets: genTargets(L.rounds, L.maxSec, L.style), style: L.style, round: 1, turn: 0, step: 'ready', times: [], solo: true };
+          app.local = { names: ['You'], rounds: L.rounds, maxSec: L.maxSec, targets: genTargets(L.rounds, L.maxSec, L.style), style: L.style, round: 1, turn: 0, step: 'ready', times: [], solo: true, retries: [0] };
           render();
         } }, 'Play again'));
     } else if (L.step === 'results') {

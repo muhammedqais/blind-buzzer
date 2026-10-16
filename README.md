@@ -37,6 +37,9 @@ one-device and solo games pick up where they were.
 - Every player in a round gets the same target.
 - Closest absolute error wins the round. Equal errors share the point.
 - Final order: round points, then lowest total error.
+- Every player gets two retries per game: while your time is still sealed and
+  others are thinking, you can withdraw it and run the round again. Play again
+  resets the count.
 
 ## Files
 
