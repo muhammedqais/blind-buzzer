@@ -126,7 +126,8 @@
   /* Dial: six stops, 10s to 60s */
   .dial { display: flex; flex-direction: column; gap: 8px; }
   .dial-track { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
-  .dial-stop { border: 0; background: transparent; border-radius: 999px; padding: 10px 0; font-family: var(--display); font-size: 14px; color: var(--muted); cursor: pointer; min-width: 0; }
+  .dial-track.n3 { grid-template-columns: repeat(3, 1fr); }
+  .dial-stop { border: 0; background: transparent; border-radius: 999px; padding: 10px 2px; font-family: var(--display); font-size: 13px; line-height: 1.1; color: var(--muted); cursor: pointer; min-width: 0; }
   .dial-stop[aria-pressed="true"] { background: var(--gold); color: #2a1d00; }
   .dial-stop:hover:not([aria-pressed="true"]) { color: var(--fg); }
 
@@ -181,8 +182,8 @@
     screen: 'home', db: null, user: null, me: null, dbReady: false, nick: '', err: '', busy: '',
     code: null, room: null, players: {}, results: {}, unsubs: [], stage: null, run: { on: false, t0: 0 },
     openRooms: [], openUnsub: null, wroteStart: false,
-    create: { rounds: 5, size: 2, maxSec: 20 }, joinCode: '',
-    local: null, lsetup: { n: 2, names: [], rounds: 5, maxSec: 20 }
+    create: { rounds: 5, size: 2, maxSec: 20, style: 'mixed' }, joinCode: '',
+    local: null, lsetup: { n: 2, names: [], rounds: 5, maxSec: 20, style: 'mixed' }
   };
 
   var root = document.getElementById('screen');
@@ -244,14 +245,19 @@
     return s;
   }
   // Targets to two decimals, from 0.05s up to the dial, never the same twice in one game.
-  // Two thirds whole seconds (1 to the dial), one third under a second (0.05 to 0.99, like 0.56).
-  // Never the same target twice in one game.
-  function genTargets(n, maxSec) {
+  // Target styles: 'whole' = whole seconds from 1 to the dial; 'fraction' = under a second, 0.05 to 0.99;
+  // 'mixed' = two thirds whole, one third fractions. Never the same target twice in one game.
+  var STYLES = [['whole', 'Whole seconds'], ['fraction', 'Fractions'], ['mixed', 'Mixed']];
+  function snapStyle(v) { return v === 'whole' || v === 'fraction' ? v : 'mixed'; }
+  function styleName(v) { v = snapStyle(v); return v === 'whole' ? 'whole seconds' : v === 'fraction' ? 'fractions of a second' : 'mixed targets'; }
+  function genTargets(n, maxSec, style) {
+    style = snapStyle(style);
     var t = [], used = {}, whole = Math.max(1, Math.floor(maxSec));
     for (var i = 0; i < n; i++) {
       var v, tries = 0;
       do {
-        if (Math.random() < 1 / 3) v = Math.round(5 + Math.random() * 95) / 100;
+        var frac = style === 'fraction' || (style === 'mixed' && Math.random() < 1 / 3);
+        if (frac) v = Math.round(5 + Math.random() * 95) / 100;
         else v = 1 + Math.floor(Math.random() * whole);
         tries++;
       } while (used[v] && tries < 100);
@@ -303,8 +309,8 @@
       if (restored.lsetup) app.lsetup = restored.lsetup;
       if (restored.create) app.create = restored.create;
     }
-    app.lsetup.maxSec = snapDial(app.lsetup.maxSec);
-    app.create.maxSec = snapDial(app.create.maxSec);
+    app.lsetup.maxSec = snapDial(app.lsetup.maxSec); app.lsetup.style = snapStyle(app.lsetup.style);
+    app.create.maxSec = snapDial(app.create.maxSec); app.create.style = snapStyle(app.create.style);
     render();
     Promise.all([useCap('db'), useCap('user')]).then(function (caps) {
       app.db = caps[0]; app.user = caps[1];
@@ -375,7 +381,7 @@
     sfx.unlock();
     var c = app.create, name = myName(), mode = netMode();
     if (!mode) return;
-    var doc = { code: '', rounds: c.rounds, size: c.size, maxSec: c.maxSec, targets: genTargets(c.rounds, c.maxSec),
+    var doc = { code: '', rounds: c.rounds, size: c.size, maxSec: c.maxSec, targets: genTargets(c.rounds, c.maxSec, c.style), style: c.style,
       status: 'open', createdAt: Date.now(), hostId: '', dropped: [] };
     app.err = ''; app.busy = 'Creating room…'; render();
     var p = mode === 'db' ? dbNet.create(doc, name) : peerNet.create(doc, name);
@@ -505,7 +511,7 @@
     },
     again: function () {
       var R = app.room;
-      return write(function () { return dbNet.ref().update({ game: (R.game || 0) + 1, targets: genTargets(R.rounds, R.maxSec), dropped: [], status: 'playing' }); });
+      return write(function () { return dbNet.ref().update({ game: (R.game || 0) + 1, targets: genTargets(R.rounds, R.maxSec, R.style), dropped: [], status: 'playing' }); });
     },
     drop: function (id) {
       var d = ((app.room && app.room.dropped) || []).slice();
@@ -632,7 +638,7 @@
     },
     restart: function () {
       var R = app.room; if (!R) return;
-      R.game = (R.game || 0) + 1; R.targets = genTargets(R.rounds, R.maxSec); R.dropped = []; R.status = 'playing';
+      R.game = (R.game || 0) + 1; R.targets = genTargets(R.rounds, R.maxSec, R.style); R.dropped = []; R.status = 'playing';
       app.results = {};
     },
     again: function () { if (peerNet.isHost) { peerNet.restart(); peerNet.broadcast(); } else peerNet.sendHost({ t: 'again' }); },
@@ -765,6 +771,14 @@
         return h('button', { class: 'dial-stop', 'aria-pressed': get() === v ? 'true' : 'false', onclick: function () { set(v); render(); } }, String(v));
       })));
   }
+  function styleSeg(get, set) {
+    return h('div', { class: 'dial', role: 'group', 'aria-label': 'Target style' },
+      h('div', { class: 'stepper' }, h('span', { class: 'lbl' }, 'Targets')),
+      h('div', { class: 'dial-track n3' }, STYLES.map(function (o) {
+        return h('button', { class: 'dial-stop', 'aria-pressed': get() === o[0] ? 'true' : 'false', onclick: function () { set(o[0]); render(); } }, o[1]);
+      })),
+      h('p', { class: 'hint' }, get() === 'whole' ? 'Whole seconds only, 1 up to the dial.' : get() === 'fraction' ? 'Under a second only, 0.05 to 0.99.' : 'Two in three whole seconds, one in three under a second.'));
+  }
   function nameField() {
     return h('div', { class: 'field' },
       h('label', { for: 'nick' }, 'Your name'),
@@ -821,15 +835,16 @@
           return h('li', { role: 'button', tabindex: '0', onclick: function () { joinRoom(r.code); },
             onkeydown: function (e) { if (e.key === 'Enter') joinRoom(r.code); } },
             h('span', { class: 'rank' }, String(r.code)),
-            h('span', { class: 'name' }, r.rounds + ' rounds · up to ' + r.maxSec + 's'),
+            h('span', { class: 'name' }, r.rounds + ' rounds · ' + styleName(r.style)),
             h('span', { class: 'tag' }, 'waiting for ' + r.size));
         })) : h('p', { class: 'hint' }, mode === 'db' ? 'Open rooms show up here as friends create them.' : 'Ask the host for their 4-letter code.')),
       h('div', { class: 'panel' },
         h('h3', {}, 'Create a room'),
         stepper('Players', function () { return c.size; }, function (v) { c.size = v; }, 2, 8),
         stepper('Rounds', function () { return c.rounds; }, function (v) { c.rounds = v; }, 1, 20),
-        dial(function () { return c.maxSec; }, function (v) { c.maxSec = v; }),
-        h('p', { class: 'hint' }, 'Whole seconds up to ' + c.maxSec + ', and one in three under a second, like 0.56. Never the same target twice in a game. The game starts the moment ' + c.size + ' players are in.'),
+        styleSeg(function () { return c.style; }, function (v) { c.style = v; }),
+        c.style === 'fraction' ? null : dial(function () { return c.maxSec; }, function (v) { c.maxSec = v; }),
+        h('p', { class: 'hint' }, 'Never the same target twice in a game. The game starts the moment ' + c.size + ' players are in.'),
         h('button', { class: 'btn primary big', id: 'create', onclick: createRoom }, 'Create room')),
       h('details', {}, h('summary', {}, 'Inviting friends'),
         h('p', {}, mode === 'peer'
@@ -899,7 +914,7 @@
       return h('section', { class: 'col', style: 'text-align:center' },
         h('p', { class: 'eyebrow' }, 'Room code'),
         h('div', { class: 'codebig' }, R.code),
-        h('p', { class: 'muted' }, ids.length + ' of ' + R.size + ' in · ' + R.rounds + (R.rounds === 1 ? ' round' : ' rounds') + ' · targets up to ' + R.maxSec + 's'),
+        h('p', { class: 'muted' }, ids.length + ' of ' + R.size + ' in · ' + R.rounds + (R.rounds === 1 ? ' round' : ' rounds') + ' · ' + (R.style === 'fraction' ? 'fractions of a second' : styleName(R.style) + ' up to ' + R.maxSec + 's')),
         h('p', {}, 'Starts on its own when ' + (R.size - ids.length) + ' more ' + (R.size - ids.length === 1 ? 'joins.' : 'join.')),
         net.mode === 'peer' && peerNet.isHost ? h('p', { class: 'hint' }, 'Your device runs this room. Keep the page open until the game ends.') : null,
         playersPanel('In the room'),
@@ -975,7 +990,8 @@
         solo ? null : stepper('Players', function () { return s.n; }, function (v) { s.n = v; }, 2, 8),
         solo ? null : h('div', { class: 'names' }, inputs),
         stepper('Rounds', function () { return s.rounds; }, function (v) { s.rounds = v; }, 1, 20),
-        dial(function () { return s.maxSec; }, function (v) { s.maxSec = v; })),
+        styleSeg(function () { return s.style; }, function (v) { s.style = v; }),
+        s.style === 'fraction' ? null : dial(function () { return s.maxSec; }, function (v) { s.maxSec = v; })),
       h('p', { class: 'hint' }, solo
         ? (best && best.avg !== undefined ? 'Your best so far: off by ' + fmt(best.avg) + ' per round on average, over ' + best.rounds + (best.rounds === 1 ? ' round.' : ' rounds.') : 'Each round shows how close you were. Finish a game to set your personal best.')
         : 'Players take turns on the same target. Each time stays sealed until everyone in the round has gone.'),
@@ -983,7 +999,7 @@
         sfx.unlock();
         var names = []; for (var i = 0; i < s.n; i++) names.push((s.names[i] || '').trim().slice(0, 14) || 'Player ' + (i + 1));
         if (solo) names = ['You'];
-        app.local = { names: names, rounds: s.rounds, maxSec: s.maxSec, targets: genTargets(s.rounds, s.maxSec), round: 1, turn: 0, step: solo ? 'ready' : 'pass', times: [], solo: solo };
+        app.local = { names: names, rounds: s.rounds, maxSec: s.maxSec, targets: genTargets(s.rounds, s.maxSec, s.style), style: s.style, round: 1, turn: 0, step: solo ? 'ready' : 'pass', times: [], solo: solo };
         app.run = { on: false, t0: 0 };
         app.screen = 'localPlay'; render();
       } }, 'Start'),
@@ -1062,7 +1078,7 @@
             return h('li', {}, h('span', { class: 'rank' }, String(i + 1)), h('span', { class: 'name' }, 'Target ' + fmtT(L.targets[i]) + 's'), h('span', { class: 'score num' }, fmt(t[0])), h('span', { class: 'diff' }, fmtDiff(t[0], L.targets[i] * 1000)));
           }))),
         h('button', { class: 'btn primary big', style: 'width:100%', onclick: function () {
-          app.local = { names: ['You'], rounds: L.rounds, maxSec: L.maxSec, targets: genTargets(L.rounds, L.maxSec), round: 1, turn: 0, step: 'ready', times: [], solo: true };
+          app.local = { names: ['You'], rounds: L.rounds, maxSec: L.maxSec, targets: genTargets(L.rounds, L.maxSec, L.style), style: L.style, round: 1, turn: 0, step: 'ready', times: [], solo: true };
           render();
         } }, 'Play again'));
     } else if (L.step === 'results') {
